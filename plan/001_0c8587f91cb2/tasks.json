@@ -59,14 +59,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Vendored formatter & licensing notices",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Copy term2html's modified `ghostty_format.zig` (which adds the `font` option) into the tree, and create the MIT license + upstream attribution files.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Vendor ghostty_format.zig (with font option) + LICENSE + licenses/ notices",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S2"
@@ -91,7 +91,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "main.zig: subcommand dispatch + --version/--help",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"
