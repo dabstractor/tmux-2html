@@ -1,0 +1,32 @@
+# Build artifacts
+dist/
+build/
+
+# Zig build artifacts
+.zig-cache/
+zig-out/
+
+# Dependencies
+node_modules/
+vendor/
+
+# Python virtual environments
+venv/
+.venv/
+
+# Environment files
+.env
+.env.*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local agent runtime artifacts (subagent transcripts, session meta, progress)
+.pi-subagents/

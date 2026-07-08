@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Core Rendering Engine",
-      "status": "Researching",
+      "status": "Planned",
       "description": "Establish the Zig project, vendor the term2html/ghostty render engine, and deliver two standalone subcommands that work WITHOUT tmux: `tmux-2html render` (ANSI stdin → color-faithful HTML) and `tmux-2html sync-palette` (OSC query → XDG cache). This phase validates every PRD §2 technical finding and the central renderer pipeline (PRD §8) in isolation. Output: a binary you can pipe colored output into and get correct HTML, plus a cached palette.",
       "milestones": [
         {
@@ -18,28 +18,40 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Zig build system (build.zig + build.zig.zon)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Create the build that fetches ghostty + parg, wires the `ghostty-vt` module, bakes in the version, and exposes `-Dsimd`.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T1.S1",
                   "title": "build.zig.zon with ghostty + parg dependencies",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
-                  "prd_selectors": ["h2.3", "h2.10", "h2.11", "h3.6"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Read plan/001_0c8587f91cb2/architecture/external_deps.md §1 for the EXACT, verified dependency declarations. Use ghostty v1.3.1 with hash `ghostty-1.3.1-5UdBCwYm-gQeBa4bu1-sMooCQS4KVriv5wWSIJ_sI-Cb` and parg hash `parg-0.0.0-dOPWZNhYAABEHE6EGXmwIucnu9vj-emodT9vmHeYynAP`. Do NOT guess hashes.\n2. INPUT: none (greenfield). The repo currently has only PRD.md + plan/.\n3. LOGIC: Create build.zig.zon: `.name = .tmux_2html` (avoid hyphen in package name identifier; the binary name is set separately in build.zig), `.version = \"0.1.0\"`, `.minimum_zig_version = \"0.15.2\"`, `.dependencies = .{ .ghostty = {url,hash}, .parg = {url,hash} }`, `.paths` including build.zig, build.zig.zon, src, scripts, tmux-2html.tmux, LICENSE, licenses, testdata. Delete the `.fingerprint` field so `zig build` regenerates it.\n4. OUTPUT: A build.zig.zon that `zig build --fetch` resolves successfully (ghostty + parg fetched).\n5. DOCS: none — no user-facing/config surface (build manifest only)."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Read plan/001_0c8587f91cb2/architecture/external_deps.md §1 for the EXACT, verified dependency declarations. Use ghostty v1.3.1 with hash `ghostty-1.3.1-5UdBCwYm-gQeBa4bu1-sMooCQS4KVriv5wWSIJ_sI-Cb` and parg hash `parg-0.0.0-dOPWZNhYAABEHE6EGXmwIucnu9vj-emodT9vmHeYynAP`. Do NOT guess hashes.\n2. INPUT: none (greenfield). The repo currently has only PRD.md + plan/.\n3. LOGIC: Create build.zig.zon: `.name = .tmux_2html` (avoid hyphen in package name identifier; the binary name is set separately in build.zig), `.version = \"0.1.0\"`, `.minimum_zig_version = \"0.15.2\"`, `.dependencies = .{ .ghostty = {url,hash}, .parg = {url,hash} }`, `.paths` including build.zig, build.zig.zon, src, scripts, tmux-2html.tmux, LICENSE, licenses, testdata. Delete the `.fingerprint` field so `zig build` regenerates it.\n4. OUTPUT: A build.zig.zon that `zig build --fetch` resolves successfully (ghostty + parg fetched).\n5. DOCS: none — no user-facing/config surface (build manifest only).",
+                  "prd_selectors": [
+                    "h2.3",
+                    "h2.10",
+                    "h2.11",
+                    "h3.6"
+                  ]
                 },
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "build.zig wiring (ghostty-vt module, version, -Dsimd, test step)",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T1.S1"],
-                  "prd_selectors": ["h2.3", "h2.7", "h2.10", "h2.11"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §2 gives the EXACT verified build.zig shape (Zig 0.15.2 `root_module`/`createModule` API). CRITICAL: ghostty is a LAZY dependency wired via `b.lazyDependency(\"ghostty\", .{.target,.optimize,.@\"version-string\",.simd})` then `exe.root_module.addImport(\"ghostty-vt\", dep.module(\"ghostty-vt\"))`. The import name is `ghostty-vt` (HYPHEN) per findings_and_corrections.md §0.1.\n2. INPUT: build.zig.zon from P1.M1.T1.S1.\n3. LOGIC: build.zig exposes `const use_simd = b.option(bool,\"simd\",...) orelse true;`; `addOptions()` bakes version into a `build_options` module (imported `@import(\"build_options\")`); `addExecutable(.{.name=\"tmux-2html\", .root_module=...})` with parg + build_options imports, `.link_libc=false`; install artifact; define a `run` step and a `test` step (`b.step(\"test\",...)`). Set `.root_source_file = b.path(\"src/main.zig\")`.\n4. OUTPUT: `zig build` produces `zig-out/bin/tmux-2html`; `zig build run -- --version` prints `tmux-2html 0.1.0`; `-Dsimd=false` disables SIMD.\n5. DOCS: none — build internals."
+                  "dependencies": [
+                    "P1.M1.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §2 gives the EXACT verified build.zig shape (Zig 0.15.2 `root_module`/`createModule` API). CRITICAL: ghostty is a LAZY dependency wired via `b.lazyDependency(\"ghostty\", .{.target,.optimize,.@\"version-string\",.simd})` then `exe.root_module.addImport(\"ghostty-vt\", dep.module(\"ghostty-vt\"))`. The import name is `ghostty-vt` (HYPHEN) per findings_and_corrections.md §0.1.\n2. INPUT: build.zig.zon from P1.M1.T1.S1.\n3. LOGIC: build.zig exposes `const use_simd = b.option(bool,\"simd\",...) orelse true;`; `addOptions()` bakes version into a `build_options` module (imported `@import(\"build_options\")`); `addExecutable(.{.name=\"tmux-2html\", .root_module=...})` with parg + build_options imports, `.link_libc=false`; install artifact; define a `run` step and a `test` step (`b.step(\"test\",...)`). Set `.root_source_file = b.path(\"src/main.zig\")`.\n4. OUTPUT: `zig build` produces `zig-out/bin/tmux-2html`; `zig build run -- --version` prints `tmux-2html 0.1.0`; `-Dsimd=false` disables SIMD.\n5. DOCS: none — build internals.",
+                  "prd_selectors": [
+                    "h2.3",
+                    "h2.7",
+                    "h2.10",
+                    "h2.11"
+                  ]
                 }
               ]
             },
@@ -56,9 +68,15 @@
                   "title": "Vendor ghostty_format.zig (with font option) + LICENSE + licenses/ notices",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T1.S2"],
-                  "prd_selectors": ["h2.3", "h2.7", "h2.13"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.4 — ghostty's STOCK formatter has NO `font` field; term2html's `src/ghostty_format.zig` is a MODIFIED vendored copy that adds `font: ?[]const u8` to `Options`. Fetch term2html's `src/ghostty_format.zig` from https://github.com/aarol/term2html and copy it verbatim into `src/ghostty_format.zig`. Keep its MIT header (© 2024 Mitchell Hashimoto / Ghostty contributors). It imports `@import(\"ghostty-vt\").{color,size,kitty,modes,Screen,Terminal,page.*,point.Coordinate,Selection,Style}`.\n2. INPUT: the `ghostty-vt` module (available after P1.M1.T1.S2).\n3. LOGIC: Create `src/ghostty_format.zig` (vendored). Create `LICENSE` (MIT, project). Create `licenses/TERM2HTML.txt` (© 2026 aarol, MIT) and `licenses/GHOSTTY-VT.txt` (© Mitchell Hashimoto / Ghostty contributors, MIT) per PRD §4/§14.\n4. OUTPUT: `src/ghostty_format.zig` compiles against `ghostty-vt`; `ScreenFormatter`, `Options{.font}`, `Content`, `Selection` are importable from it.\n5. DOCS: none — internal vendoring. (README attribution is handled by the final P4.M2 docs task per §5 Mode B.)"
+                  "dependencies": [
+                    "P1.M1.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.4 — ghostty's STOCK formatter has NO `font` field; term2html's `src/ghostty_format.zig` is a MODIFIED vendored copy that adds `font: ?[]const u8` to `Options`. Fetch term2html's `src/ghostty_format.zig` from https://github.com/aarol/term2html and copy it verbatim into `src/ghostty_format.zig`. Keep its MIT header (© 2024 Mitchell Hashimoto / Ghostty contributors). It imports `@import(\"ghostty-vt\").{color,size,kitty,modes,Screen,Terminal,page.*,point.Coordinate,Selection,Style}`.\n2. INPUT: the `ghostty-vt` module (available after P1.M1.T1.S2).\n3. LOGIC: Create `src/ghostty_format.zig` (vendored). Create `LICENSE` (MIT, project). Create `licenses/TERM2HTML.txt` (© 2026 aarol, MIT) and `licenses/GHOSTTY-VT.txt` (© Mitchell Hashimoto / Ghostty contributors, MIT) per PRD §4/§14.\n4. OUTPUT: `src/ghostty_format.zig` compiles against `ghostty-vt`; `ScreenFormatter`, `Options{.font}`, `Content`, `Selection` are importable from it.\n5. DOCS: none — internal vendoring. (README attribution is handled by the final P4.M2 docs task per §5 Mode B.)",
+                  "prd_selectors": [
+                    "h2.3",
+                    "h2.7",
+                    "h2.13"
+                  ]
                 }
               ]
             },
@@ -75,9 +93,14 @@
                   "title": "main.zig: subcommand dispatch + --version/--help",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T2.S1"],
-                  "prd_selectors": ["h2.4", "h3.6"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §2 + external_deps.md §4. parg has NO native subcommand support. term2html's main.zig pattern: `parg.parse(args, .{})`, skip program name via `nextValue()`, then loop `next()` returning tokens `.flag/.arg/.unexpected_value`. Exit codes: 0 ok, 1 usage/runtime, 2 capture/target (PRD §5).\n2. INPUT: `@import(\"build_options\")` (version, from P1.M1.T1.S2); `@import(\"parg\")`.\n3. LOGIC: src/main.zig reads args; BEFORE the flag loop, detect the first positional `.arg` = subcommand (`render|pane|region|sync-palette`). Handle `--version`/`--help`/no-subcommand → print help (exit 0/1). Dispatch to per-subcommand functions in cli.zig (stubs returning `error.NotImplemented` are fine for this subtask; the bodies land in later milestones). Use `std.heap.DebugAllocator`.\n4. OUTPUT: `tmux-2html --version` prints version; `tmux-2html --help` lists subcommands; unknown subcommand → exit 1 with usage.\n5. DOCS: [Mode A] the `--help` text IS the CLI doc surface — make it list every subcommand and its flags (reflects PRD §5). Keep it accurate as subcommands are implemented."
+                  "dependencies": [
+                    "P1.M1.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §2 + external_deps.md §4. parg has NO native subcommand support. term2html's main.zig pattern: `parg.parse(args, .{})`, skip program name via `nextValue()`, then loop `next()` returning tokens `.flag/.arg/.unexpected_value`. Exit codes: 0 ok, 1 usage/runtime, 2 capture/target (PRD §5).\n2. INPUT: `@import(\"build_options\")` (version, from P1.M1.T1.S2); `@import(\"parg\")`.\n3. LOGIC: src/main.zig reads args; BEFORE the flag loop, detect the first positional `.arg` = subcommand (`render|pane|region|sync-palette`). Handle `--version`/`--help`/no-subcommand → print help (exit 0/1). Dispatch to per-subcommand functions in cli.zig (stubs returning `error.NotImplemented` are fine for this subtask; the bodies land in later milestones). Use `std.heap.DebugAllocator`.\n4. OUTPUT: `tmux-2html --version` prints version; `tmux-2html --help` lists subcommands; unknown subcommand → exit 1 with usage.\n5. DOCS: [Mode A] the `--help` text IS the CLI doc surface — make it list every subcommand and its flags (reflects PRD §5). Keep it accurate as subcommands are implemented.",
+                  "prd_selectors": [
+                    "h2.4",
+                    "h3.6"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -85,9 +108,17 @@
                   "title": "cli.zig: parg flag/option parser for all subcommands",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T3.S1"],
-                  "prd_selectors": ["h2.4", "h3.2", "h3.3", "h3.4", "h3.5"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §4 — verified parg API: `flag.isLong(\"x\")`, `flag.isShort('x')`, `flag.name`, `arg_parser.nextValue()` (consumes a flag's value), tokens `.flag/.arg/.unexpected_value`.\n2. INPUT: main.zig passes the post-subcommand arg slice to cli.zig.\n3. LOGIC: Define a parsed-options struct per subcommand (e.g. `RenderOpts{cols,rows,font,palette_mode,output,open,selection}`, `PaneOpts{target,visible,full,history,font,output,open}`, `RegionOpts{target,font,output,open}`, `SyncPaletteOpts{from,force}`). Parse with parg; validate mutual exclusivity (`pane --visible` vs `--full`); error + exit 1 on missing values. Expose typed structs to the subcommand implementations.\n4. OUTPUT: cli.zig returns validated option structs; consumers never touch parg directly. Each flag maps to a PRD §5 field.\n5. DOCS: [Mode A] keep the per-flag semantics in sync with main.zig --help (Mode A doc = the help text)."
+                  "dependencies": [
+                    "P1.M1.T3.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §4 — verified parg API: `flag.isLong(\"x\")`, `flag.isShort('x')`, `flag.name`, `arg_parser.nextValue()` (consumes a flag's value), tokens `.flag/.arg/.unexpected_value`.\n2. INPUT: main.zig passes the post-subcommand arg slice to cli.zig.\n3. LOGIC: Define a parsed-options struct per subcommand (e.g. `RenderOpts{cols,rows,font,palette_mode,output,open,selection}`, `PaneOpts{target,visible,full,history,font,output,open}`, `RegionOpts{target,font,output,open}`, `SyncPaletteOpts{from,force}`). Parse with parg; validate mutual exclusivity (`pane --visible` vs `--full`); error + exit 1 on missing values. Expose typed structs to the subcommand implementations.\n4. OUTPUT: cli.zig returns validated option structs; consumers never touch parg directly. Each flag maps to a PRD §5 field.\n5. DOCS: [Mode A] keep the per-flag semantics in sync with main.zig --help (Mode A doc = the help text).",
+                  "prd_selectors": [
+                    "h2.4",
+                    "h3.2",
+                    "h3.3",
+                    "h3.4",
+                    "h3.5"
+                  ]
                 }
               ]
             }
@@ -113,9 +144,14 @@
                   "title": "Absorb queryColors() (OSC 4/10/11) + Colors struct",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T2.S1"],
-                  "prd_selectors": ["h2.5", "h3.5"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §2 — VERIFIED term2html `src/terminal.zig::queryColors` flow. Use `std.posix.tcgetattr/tcsetattr(..,.FLUSH,..)`, raw mode (`lflag.ICANON/ECHO=false`, `cc[V.MIN]=0, cc[V.TIME]=5` → 500ms timeout because macOS can't poll /dev/tty). Query OSC 4 in batches of 32 (`\\x1b]4;{idx};?\\x07`), plus `\\x1b]10;?\\x07\\x1b]11;?\\x07`. Parse responses with `ghostty_vt.Parser`; on `.osc_dispatch` extract `.color_operation.requests` → `.set.target==.palette/.dynamic`. Copy this code verbatim from term2html, adapted.\n2. INPUT: `@import(\"ghostty-vt\").{color, Parser, osc}`.\n3. LOGIC: `pub const Colors = struct { palette: [256]color.RGB, foreground, background: ?color.RGB, palette_received_count: u16 };` `pub fn queryColors() !Colors` — opens `/dev/tty` read_write. `defaultColors()` returns `palette = ghostty_vt.color.default`, fg=palette[7], bg={41,44,51}.\n4. OUTPUT: `palette.Colors` + `queryColors()` for downstream render + sync-palette. `palette_received_count<256` logs the not-responding warning.\n5. MOCKING: queryColors is interactive-only; this subtask's own tests mock /dev/tty by NOT calling queryColors (unit-test the Colors struct + applyOscCommand logic against fixed byte streams). DOCS: none — internal module."
+                  "dependencies": [
+                    "P1.M1.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §2 — VERIFIED term2html `src/terminal.zig::queryColors` flow. Use `std.posix.tcgetattr/tcsetattr(..,.FLUSH,..)`, raw mode (`lflag.ICANON/ECHO=false`, `cc[V.MIN]=0, cc[V.TIME]=5` → 500ms timeout because macOS can't poll /dev/tty). Query OSC 4 in batches of 32 (`\\x1b]4;{idx};?\\x07`), plus `\\x1b]10;?\\x07\\x1b]11;?\\x07`. Parse responses with `ghostty_vt.Parser`; on `.osc_dispatch` extract `.color_operation.requests` → `.set.target==.palette/.dynamic`. Copy this code verbatim from term2html, adapted.\n2. INPUT: `@import(\"ghostty-vt\").{color, Parser, osc}`.\n3. LOGIC: `pub const Colors = struct { palette: [256]color.RGB, foreground, background: ?color.RGB, palette_received_count: u16 };` `pub fn queryColors() !Colors` — opens `/dev/tty` read_write. `defaultColors()` returns `palette = ghostty_vt.color.default`, fg=palette[7], bg={41,44,51}.\n4. OUTPUT: `palette.Colors` + `queryColors()` for downstream render + sync-palette. `palette_received_count<256` logs the not-responding warning.\n5. MOCKING: queryColors is interactive-only; this subtask's own tests mock /dev/tty by NOT calling queryColors (unit-test the Colors struct + applyOscCommand logic against fixed byte streams). DOCS: none — internal module.",
+                  "prd_selectors": [
+                    "h2.5",
+                    "h3.5"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -123,9 +159,14 @@
                   "title": "Palette cache read/write (XDG path, plain-text format)",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M2.T1.S1"],
-                  "prd_selectors": ["h2.5", "h3.5"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 — cache at `${XDG_CACHE_HOME:-$HOME/.cache}/tmux-2html/palette`. Format (verbatim): a header line `# tmux-2html palette (queried <iso8601>)`, then `fg R G B`, `bg R G B`, then `0 R G B` … `255 R G B`.\n2. INPUT: `Colors` struct from P1.M2.T1.S1.\n3. LOGIC: `cachePath(alloc) ![]u8` (resolve XDG_CACHE_HOME/HOME via std.posix.getenv). `writeCache(Colors) !void` (mkdir parent, atomic write: temp+rename). `loadCache(alloc) !Colors` (parse the 256+2 lines; tolerate/handle missing entries). Round-trip must be exact.\n4. OUTPUT: load/write round-trip a `Colors`; parse is debuggable plain text.\n5. DOCS: [Mode A] document the cache file location + format in `docs/CONFIGURATION.md` §Palette (this is a user-facing config/cache surface per §5 Mode A). Create the file if absent."
+                  "dependencies": [
+                    "P1.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 — cache at `${XDG_CACHE_HOME:-$HOME/.cache}/tmux-2html/palette`. Format (verbatim): a header line `# tmux-2html palette (queried <iso8601>)`, then `fg R G B`, `bg R G B`, then `0 R G B` … `255 R G B`.\n2. INPUT: `Colors` struct from P1.M2.T1.S1.\n3. LOGIC: `cachePath(alloc) ![]u8` (resolve XDG_CACHE_HOME/HOME via std.posix.getenv). `writeCache(Colors) !void` (mkdir parent, atomic write: temp+rename). `loadCache(alloc) !Colors` (parse the 256+2 lines; tolerate/handle missing entries). Round-trip must be exact.\n4. OUTPUT: load/write round-trip a `Colors`; parse is debuggable plain text.\n5. DOCS: [Mode A] document the cache file location + format in `docs/CONFIGURATION.md` §Palette (this is a user-facing config/cache surface per §5 Mode A). Create the file if absent.",
+                  "prd_selectors": [
+                    "h2.5",
+                    "h3.5"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -133,9 +174,13 @@
                   "title": "palette.resolve() precedence (cached → live → default)",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M2.T1.S2"],
-                  "prd_selectors": ["h2.5"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 precedence. CRITICAL constraint (findings §3): `live` (queryColors) must ONLY be attempted when a controlling tty exists (interactive CLI / display-popup) — NEVER in a `run-shell` context (no /dev/tty). `default` = `defaultColors()` (ghostty palette).\n2. INPUT: a mode enum `{default, cached, live}` (or the PRD `--palette MODE` string) + Colors from cache.\n3. LOGIC: `resolve(mode, has_tty: bool) Colors` — `cached`: loadCache, fall back to live(if has_tty)/default on missing; `live`: if has_tty queryColors else fall back cached/default; `default`: defaultColors. Expose `hasControllingTty()` (try open /dev/tty read-only, close, return true/false).\n4. OUTPUT: a single `resolve()` callers use; never panics on missing tty.\n5. DOCS: none — internal; the cache docs are in S2, the flag is documented in render's help."
+                  "dependencies": [
+                    "P1.M2.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 precedence. CRITICAL constraint (findings §3): `live` (queryColors) must ONLY be attempted when a controlling tty exists (interactive CLI / display-popup) — NEVER in a `run-shell` context (no /dev/tty). `default` = `defaultColors()` (ghostty palette).\n2. INPUT: a mode enum `{default, cached, live}` (or the PRD `--palette MODE` string) + Colors from cache.\n3. LOGIC: `resolve(mode, has_tty: bool) Colors` — `cached`: loadCache, fall back to live(if has_tty)/default on missing; `live`: if has_tty queryColors else fall back cached/default; `default`: defaultColors. Expose `hasControllingTty()` (try open /dev/tty read-only, close, return true/false).\n4. OUTPUT: a single `resolve()` callers use; never panics on missing tty.\n5. DOCS: none — internal; the cache docs are in S2, the flag is documented in render's help.",
+                  "prd_selectors": [
+                    "h2.5"
+                  ]
                 }
               ]
             },
@@ -152,9 +197,16 @@
                   "title": "sync-palette command (--from, --force) → writeCache",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M2.T1.S3", "P1.M1.T3.S2"],
-                  "prd_selectors": ["h2.4", "h2.5", "h3.5"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.4 + §6. Default `--from tty`. `--force` re-queries even if cache exists. Exits non-zero if terminal doesn't respond within timeout (palette_received_count<256 → warning; total failure → error exit).\n2. INPUT: `SyncPaletteOpts{from, force}` from cli.zig (P1.M1.T3.S2); `palette.queryColors/writeCache` (P1.M2.T1).\n3. LOGIC: In main.zig dispatch + a syncPalette(opts) fn: if `--from tty`, call queryColors (requires /dev/tty; if absent, error exit 2). If `--from file PATH`, loadColors from a file instead. Unless cache exists AND not `--force`, writeCache. Print a summary (`queried N/256 colors; cache at <path>`).\n4. OUTPUT: running `tmux-2html sync-palette` interactively produces/refreshes the cache file; `--force` re-queries; missing tty → exit 2.\n5. DOCS: [Mode A] document sync-palette behavior + the in-tmux-vs-outer-terminal palette caveat (PRD §6) in `docs/CONFIGURATION.md` §sync-palette."
+                  "dependencies": [
+                    "P1.M2.T1.S3",
+                    "P1.M1.T3.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.4 + §6. Default `--from tty`. `--force` re-queries even if cache exists. Exits non-zero if terminal doesn't respond within timeout (palette_received_count<256 → warning; total failure → error exit).\n2. INPUT: `SyncPaletteOpts{from, force}` from cli.zig (P1.M1.T3.S2); `palette.queryColors/writeCache` (P1.M2.T1).\n3. LOGIC: In main.zig dispatch + a syncPalette(opts) fn: if `--from tty`, call queryColors (requires /dev/tty; if absent, error exit 2). If `--from file PATH`, loadColors from a file instead. Unless cache exists AND not `--force`, writeCache. Print a summary (`queried N/256 colors; cache at <path>`).\n4. OUTPUT: running `tmux-2html sync-palette` interactively produces/refreshes the cache file; `--force` re-queries; missing tty → exit 2.\n5. DOCS: [Mode A] document sync-palette behavior + the in-tmux-vs-outer-terminal palette caveat (PRD §6) in `docs/CONFIGURATION.md` §sync-palette.",
+                  "prd_selectors": [
+                    "h2.4",
+                    "h2.5",
+                    "h3.5"
+                  ]
                 }
               ]
             }
@@ -180,9 +232,16 @@
                   "title": "renderGrid() core pipeline (default colors) + render subcommand (stdin→stdout)",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M2.T1.S1", "P1.M1.T3.S2"],
-                  "prd_selectors": ["h2.7", "h3.2", "h2.1"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §1 — VERIFIED term2html `formatAnsi` shape. `var t: ghostty_vt.Terminal = try .init(alloc, .{.cols,.rows}); defer t.deinit(alloc);` then `var stream = t.vtStream(); defer stream.deinit();` feed bytes translating `\\n`→`\\r\\n` (feed `\\r` then `\\n`). Then `var formatter = ghostty_format.ScreenFormatter.init(t.screens.active, .{.emit=.html, .background,.foreground,.palette=&pal, .font});` set `formatter.content = .{ .selection = null };` `formatter.extra = .styles;` then `writer.print(\"{f}\", .{formatter});`.\n2. INPUT: ansi bytes (stdin for the `render` subcommand), size (cols/rows), Colors.\n3. LOGIC: `pub fn renderGrid(alloc, ansi: []const u8, size: Size, colors: Colors, sel: ?Selection, font: ?[]const u8, out: *Writer) !void` — builds Terminal, feeds ansi, sets content.selection = sel (null = whole grid), prints formatter. The `render` subcommand reads stdin fully, resolves colors via defaultColors() initially (S3 wires --palette), writes to stdout.\n4. OUTPUT: `printf '\\033[31mred\\033[0m' | tmux-2html render --cols 40` emits valid HTML with the red span. renderGrid is the single primitive P2/P3 reuse.\n5. DOCS: none — internal primitive; the flag surface is in help."
+                  "dependencies": [
+                    "P1.M2.T1.S1",
+                    "P1.M1.T3.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §1 — VERIFIED term2html `formatAnsi` shape. `var t: ghostty_vt.Terminal = try .init(alloc, .{.cols,.rows}); defer t.deinit(alloc);` then `var stream = t.vtStream(); defer stream.deinit();` feed bytes translating `\\n`→`\\r\\n` (feed `\\r` then `\\n`). Then `var formatter = ghostty_format.ScreenFormatter.init(t.screens.active, .{.emit=.html, .background,.foreground,.palette=&pal, .font});` set `formatter.content = .{ .selection = null };` `formatter.extra = .styles;` then `writer.print(\"{f}\", .{formatter});`.\n2. INPUT: ansi bytes (stdin for the `render` subcommand), size (cols/rows), Colors.\n3. LOGIC: `pub fn renderGrid(alloc, ansi: []const u8, size: Size, colors: Colors, sel: ?Selection, font: ?[]const u8, out: *Writer) !void` — builds Terminal, feeds ansi, sets content.selection = sel (null = whole grid), prints formatter. The `render` subcommand reads stdin fully, resolves colors via defaultColors() initially (S3 wires --palette), writes to stdout.\n4. OUTPUT: `printf '\\033[31mred\\033[0m' | tmux-2html render --cols 40` emits valid HTML with the red span. renderGrid is the single primitive P2/P3 reuse.\n5. DOCS: none — internal primitive; the flag surface is in help.",
+                  "prd_selectors": [
+                    "h2.7",
+                    "h3.2",
+                    "h2.1"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -190,9 +249,14 @@
                   "title": "Sizing (--cols/--rows), --font, --output, --open",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M3.T1.S1"],
-                  "prd_selectors": ["h3.2", "h2.1"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.1 + §2.3 — `--cols` is REQUIRED if no tty (= pane width); `--rows` defaults to input line count. `--open` implies `--output` (temp file) if none given, then spawns `xdg-open` (use std.process.Child; ignore failure gracefully).\n2. INPUT: RenderOpts from cli.zig (P1.M1.T3.S2); renderGrid from S1.\n3. LOGIC: Determine cols (required when no tty: detect via palette.hasControllingTty(); if tty present, fall back to getSize() per render_pipeline §3); rows (count `\\n` in input if unset). Write HTML to stdout or `--output` file (atomic). If `--open`, ensure an output file exists then spawn xdg-open. Exit 2 on size/capture errors.\n4. OUTPUT: `render --cols 80 --output out.html` writes the file; `--open` opens it.\n5. DOCS: none — covered by --help (Mode A doc = help text, already in P1.M1.T3.S1)."
+                  "dependencies": [
+                    "P1.M3.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.1 + §2.3 — `--cols` is REQUIRED if no tty (= pane width); `--rows` defaults to input line count. `--open` implies `--output` (temp file) if none given, then spawns `xdg-open` (use std.process.Child; ignore failure gracefully).\n2. INPUT: RenderOpts from cli.zig (P1.M1.T3.S2); renderGrid from S1.\n3. LOGIC: Determine cols (required when no tty: detect via palette.hasControllingTty(); if tty present, fall back to getSize() per render_pipeline §3); rows (count `\\n` in input if unset). Write HTML to stdout or `--output` file (atomic). If `--open`, ensure an output file exists then spawn xdg-open. Exit 2 on size/capture errors.\n4. OUTPUT: `render --cols 80 --output out.html` writes the file; `--open` opens it.\n5. DOCS: none — covered by --help (Mode A doc = help text, already in P1.M1.T3.S1).",
+                  "prd_selectors": [
+                    "h3.2",
+                    "h2.1"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -200,9 +264,15 @@
                   "title": "--palette MODE flag (cached→live→default via palette.resolve)",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M3.T1.S1", "P1.M2.T1.S3"],
-                  "prd_selectors": ["h2.5", "h3.2"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.1 `--palette default|cached|live` (default precedence cached→live→default). `live` only attempted when a tty exists.\n2. INPUT: RenderOpts.palette_mode; palette.resolve (P1.M2.T1.S3); hasControllingTty().\n3. LOGIC: In the render subcommand, replace the defaultColors() call: `const colors = palette.resolve(mode, palette.hasControllingTty());` then renderGrid with those colors.\n4. OUTPUT: `render --palette default` uses ghostty palette; `--palette cached` reads cache (falls back if missing); `--palette live` queries tty when present.\n5. DOCS: none — flag in help."
+                  "dependencies": [
+                    "P1.M3.T1.S1",
+                    "P1.M2.T1.S3"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.1 `--palette default|cached|live` (default precedence cached→live→default). `live` only attempted when a tty exists.\n2. INPUT: RenderOpts.palette_mode; palette.resolve (P1.M2.T1.S3); hasControllingTty().\n3. LOGIC: In the render subcommand, replace the defaultColors() call: `const colors = palette.resolve(mode, palette.hasControllingTty());` then renderGrid with those colors.\n4. OUTPUT: `render --palette default` uses ghostty palette; `--palette cached` reads cache (falls back if missing); `--palette live` queries tty when present.\n5. DOCS: none — flag in help.",
+                  "prd_selectors": [
+                    "h2.5",
+                    "h3.2"
+                  ]
                 }
               ]
             }
@@ -228,9 +298,15 @@
                   "title": "Coordinate → Pin → Selection construction + --selection flag",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M3.T1.S1"],
-                  "prd_selectors": ["h3.2", "h2.1", "h3.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.2 + render_pipeline.md §4 — VERIFIED API: `Selection = @import(\"ghostty-vt\").Selection`; `Selection.init(start_pin, end_pin, rect)` (field `.rectangle`, NOT `.rect`); `PageList.pin(pt: point.Point) ?Pin` (PageList.zig:4145, returns null if x>=cols). `point.Point` has `.coord()` returning {.x,.y}. VERIFY at impl time (read ghostty point.zig): how to build a `point.Point` from (x,y).\n2. INPUT: RenderOpts.selection string \"X1,Y1,X2,Y2[,rect]\"; the built Terminal screen (t.screens.active) — the selection is applied AFTER feeding ANSI (renderGrid already has the screen; refactor so the selection is built from the screen's pages).\n3. LOGIC: Parse 4–5 ints. Build start/end `point.Point`s (x=col, y=row). `const sp = screen.pages.pin(start_pt) orelse return error.OutOfRange;` likewise end. `var sel = Selection.init(sp, ep, rect_flag); defer sel.deinit(...);` Pass `sel` (not null) as renderGrid's `sel`. Linewise default (rect=0); rect=1 → block. Empty/zero-cell selection on render → warn, exit 1 (PRD §13).\n4. OUTPUT: `cat testdata/x.ansi | tmux-2html render --cols 80 --selection 0,1,79,5` emits only rows 1–5; `--selection 5,1,20,5,1` emits the block. This is the exact machinery P3.M2.T2.S2 reuses for the TUI.\n5. DOCS: none — flag in help; the selection model is also described in the final README (P4.M2)."
+                  "dependencies": [
+                    "P1.M3.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.2 + render_pipeline.md §4 — VERIFIED API: `Selection = @import(\"ghostty-vt\").Selection`; `Selection.init(start_pin, end_pin, rect)` (field `.rectangle`, NOT `.rect`); `PageList.pin(pt: point.Point) ?Pin` (PageList.zig:4145, returns null if x>=cols). `point.Point` has `.coord()` returning {.x,.y}. VERIFY at impl time (read ghostty point.zig): how to build a `point.Point` from (x,y).\n2. INPUT: RenderOpts.selection string \"X1,Y1,X2,Y2[,rect]\"; the built Terminal screen (t.screens.active) — the selection is applied AFTER feeding ANSI (renderGrid already has the screen; refactor so the selection is built from the screen's pages).\n3. LOGIC: Parse 4–5 ints. Build start/end `point.Point`s (x=col, y=row). `const sp = screen.pages.pin(start_pt) orelse return error.OutOfRange;` likewise end. `var sel = Selection.init(sp, ep, rect_flag); defer sel.deinit(...);` Pass `sel` (not null) as renderGrid's `sel`. Linewise default (rect=0); rect=1 → block. Empty/zero-cell selection on render → warn, exit 1 (PRD §13).\n4. OUTPUT: `cat testdata/x.ansi | tmux-2html render --cols 80 --selection 0,1,79,5` emits only rows 1–5; `--selection 5,1,20,5,1` emits the block. This is the exact machinery P3.M2.T2.S2 reuses for the TUI.\n5. DOCS: none — flag in help; the selection model is also described in the final README (P4.M2).",
+                  "prd_selectors": [
+                    "h3.2",
+                    "h2.1",
+                    "h3.10"
+                  ]
                 }
               ]
             },
@@ -247,9 +323,15 @@
                   "title": "Golden harness + testdata (color/attr/OSC8 cases)",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M3.T1.S1", "P1.M1.T2.S1"],
-                  "prd_selectors": ["h2.14", "h2.7"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §5 — term2html's test is `test \"output matches testdata\"` in main.zig: `inline for` over names, fixed WindowSize{cols=120,rows=150}, defaultColors, expectEqualStrings against testdata/<name>.html. Vendor term2html's testdata/{hyperfine,fastfetch,hyperlink}.{ansi,html} as a baseline, then ADD cases for 16/256/truecolor, all attributes, OSC 8.\n2. INPUT: renderGrid (P1.M3.T1.S1); vendored testdata fixtures.\n3. LOGIC: A `test` block that runs renderGrid for each fixture at a fixed size with defaultColors and asserts byte-equal HTML. Tests run via `zig build test` in ReleaseFast (PRD §15 linker-bug note).\n4. OUTPUT: `zig build test` passes; testdata covers 16/256/truecolor/attributes/links.\n5. DOCS: none — test infra."
+                  "dependencies": [
+                    "P1.M3.T1.S1",
+                    "P1.M1.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render_pipeline.md §5 — term2html's test is `test \"output matches testdata\"` in main.zig: `inline for` over names, fixed WindowSize{cols=120,rows=150}, defaultColors, expectEqualStrings against testdata/<name>.html. Vendor term2html's testdata/{hyperfine,fastfetch,hyperlink}.{ansi,html} as a baseline, then ADD cases for 16/256/truecolor, all attributes, OSC 8.\n2. INPUT: renderGrid (P1.M3.T1.S1); vendored testdata fixtures.\n3. LOGIC: A `test` block that runs renderGrid for each fixture at a fixed size with defaultColors and asserts byte-equal HTML. Tests run via `zig build test` in ReleaseFast (PRD §15 linker-bug note).\n4. OUTPUT: `zig build test` passes; testdata covers 16/256/truecolor/attributes/links.\n5. DOCS: none — test infra.",
+                  "prd_selectors": [
+                    "h2.14",
+                    "h2.7"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -257,9 +339,15 @@
                   "title": "Palette parse/serialize + selection sub-rectangle golden tests",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M2.T1.S2", "P1.M4.T1.S1"],
-                  "prd_selectors": ["h2.14", "h3.2"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 — unit tests for palette parse/serialize and selection sub-rectangles (linewise + block).\n2. INPUT: palette loadCache/writeCache (P1.M2.T1.S2); render --selection (P1.M4.T1.S1).\n3. LOGIC: (a) `test` round-tripping a Colors through writeCache→loadCache == equal. (b) `test` rendering a fixture with a fixed linewise selection and a fixed block selection, comparing bytes (add testdata/sel_linewise.{ansi,html} + sel_block.{ansi,html}).\n4. OUTPUT: unit + golden selection tests green.\n5. DOCS: none — tests."
+                  "dependencies": [
+                    "P1.M2.T1.S2",
+                    "P1.M4.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 — unit tests for palette parse/serialize and selection sub-rectangles (linewise + block).\n2. INPUT: palette loadCache/writeCache (P1.M2.T1.S2); render --selection (P1.M4.T1.S1).\n3. LOGIC: (a) `test` round-tripping a Colors through writeCache→loadCache == equal. (b) `test` rendering a fixture with a fixed linewise selection and a fixed block selection, comparing bytes (add testdata/sel_linewise.{ansi,html} + sel_block.{ansi,html}).\n4. OUTPUT: unit + golden selection tests green.\n5. DOCS: none — tests.",
+                  "prd_selectors": [
+                    "h2.14",
+                    "h3.2"
+                  ]
                 }
               ]
             }
@@ -294,9 +382,14 @@
                   "title": "Pane geometry + capture-pane command builder",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T3.S2"],
-                  "prd_selectors": ["h2.1", "h3.3"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §3 + render_pipeline §3 — CRITICAL: there is NO /dev/tty in run-shell, so DO NOT use getSize(). Get cols/rows from tmux: `tmux display-message -p -t <pane> '#{pane_width}'` and `'#{pane_height}'` (or a combined format). capture-pane flags: `-e` (escape/SGR/OSC8), `-J` (join wrapped), `-p` (stdout), `-t <pane>`, scrollback `-S -<N> -E -` (full), visible = omit -S/-E. $TMUX/$TMUX_PANE are set for run-shell children.\n2. INPUT: pane id (from --target or $TMUX_PANE), mode (visible/full), history limit (default 50000).\n3. LOGIC: `geometry(pane) !Size` runs the display-message calls. `captureCmd(pane, mode, history) [][:0]u8` builds the argv. Both shell out via `std.process.Child` with inherited env ($TMUX present so the right socket is used). Capture stdout bytes.\n4. OUTPUT: `Captured { ansi: []u8, cols: u16, rows: u16 }` (cols/rows from tmux, NOT a tty ioctl).\n5. MOCKING: structure so geometry()/capture() are behind function pointers / an interface so unit tests inject a fake tmux returning testdata .ansi. NEVER require a live tmux server in unit tests. DOCS: none — internal."
+                  "dependencies": [
+                    "P1.M1.T3.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §3 + render_pipeline §3 — CRITICAL: there is NO /dev/tty in run-shell, so DO NOT use getSize(). Get cols/rows from tmux: `tmux display-message -p -t <pane> '#{pane_width}'` and `'#{pane_height}'` (or a combined format). capture-pane flags: `-e` (escape/SGR/OSC8), `-J` (join wrapped), `-p` (stdout), `-t <pane>`, scrollback `-S -<N> -E -` (full), visible = omit -S/-E. $TMUX/$TMUX_PANE are set for run-shell children.\n2. INPUT: pane id (from --target or $TMUX_PANE), mode (visible/full), history limit (default 50000).\n3. LOGIC: `geometry(pane) !Size` runs the display-message calls. `captureCmd(pane, mode, history) [][:0]u8` builds the argv. Both shell out via `std.process.Child` with inherited env ($TMUX present so the right socket is used). Capture stdout bytes.\n4. OUTPUT: `Captured { ansi: []u8, cols: u16, rows: u16 }` (cols/rows from tmux, NOT a tty ioctl).\n5. MOCKING: structure so geometry()/capture() are behind function pointers / an interface so unit tests inject a fake tmux returning testdata .ansi. NEVER require a live tmux server in unit tests. DOCS: none — internal.",
+                  "prd_selectors": [
+                    "h2.1",
+                    "h3.3"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -304,9 +397,14 @@
                   "title": "parse capture output → Captured; visible vs full; history cap + truncation notice",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P2.M1.T1.S1"],
-                  "prd_selectors": ["h3.3", "h2.12"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.2 + §13 — `--full` uses `-S -<history> -E -`; `--visible` (default) captures only visible rows. Huge scrollback (history-limit up to 1,000,000) is capped at @tmux-2html-history-limit (default 50k) with a status notice when truncated.\n2. INPUT: capture builder from S1.\n3. LOGIC: For --full: derive `-S -<min(history, configured_limit)> -E -`. After capture, if the captured row count hit the cap, set a `truncated: bool` flag. The subcommand layer emits the notice (tmux display-message / stderr).\n4. OUTPUT: `Captured` includes `truncated`; `-S/-E` derivation is unit-tested (line-range→flags).\n5. DOCS: none — internal."
+                  "dependencies": [
+                    "P2.M1.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.2 + §13 — `--full` uses `-S -<history> -E -`; `--visible` (default) captures only visible rows. Huge scrollback (history-limit up to 1,000,000) is capped at @tmux-2html-history-limit (default 50k) with a status notice when truncated.\n2. INPUT: capture builder from S1.\n3. LOGIC: For --full: derive `-S -<min(history, configured_limit)> -E -`. After capture, if the captured row count hit the cap, set a `truncated: bool` flag. The subcommand layer emits the notice (tmux display-message / stderr).\n4. OUTPUT: `Captured` includes `truncated`; `-S/-E` derivation is unit-tested (line-range→flags).\n5. DOCS: none — internal.",
+                  "prd_selectors": [
+                    "h3.3",
+                    "h2.12"
+                  ]
                 }
               ]
             },
@@ -323,9 +421,16 @@
                   "title": "pane subcommand: capture → renderGrid + filename collision avoidance + open",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P2.M1.T1.S2", "P1.M3.T1.S1", "P1.M2.T1.S3"],
-                  "prd_selectors": ["h3.3", "h2.12"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.2 + §13 — concurrent runs must not collide: output filenames include session + timestamp + pid. Output dir = @tmux-2html-output-dir (default ${XDG_DATA_HOME:-~/.local/share}/tmux-2html).\n2. INPUT: PaneOpts (P1.M1.T3.S2); Captured (P2.M1.T1.S2); palette.resolve.\n3. LOGIC: pane(opts): resolve target ($TMUX_PANE default); capture (visible/full/history); colors = palette.resolve(cached→…, has_tty=false so live is skipped in run-shell); renderGrid(sel=null) to output file named `<session>-<unixtime>-<pid>.html` in output-dir; if --open, xdg-open. Exit 2 on capture error.\n4. OUTPUT: `tmux-2html pane --full` (run with $TMUX set) writes a pane HTML file. When invoked from a binding (no tty) it uses the cached palette.\n5. DOCS: none — covered by help + plugin options (P2.M2)."
+                  "dependencies": [
+                    "P2.M1.T1.S2",
+                    "P1.M3.T1.S1",
+                    "P1.M2.T1.S3"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.2 + §13 — concurrent runs must not collide: output filenames include session + timestamp + pid. Output dir = @tmux-2html-output-dir (default ${XDG_DATA_HOME:-~/.local/share}/tmux-2html).\n2. INPUT: PaneOpts (P1.M1.T3.S2); Captured (P2.M1.T1.S2); palette.resolve.\n3. LOGIC: pane(opts): resolve target ($TMUX_PANE default); capture (visible/full/history); colors = palette.resolve(cached→…, has_tty=false so live is skipped in run-shell); renderGrid(sel=null) to output file named `<session>-<unixtime>-<pid>.html` in output-dir; if --open, xdg-open. Exit 2 on capture error.\n4. OUTPUT: `tmux-2html pane --full` (run with $TMUX set) writes a pane HTML file. When invoked from a binding (no tty) it uses the cached palette.\n5. DOCS: none — covered by help + plugin options (P2.M2).",
+                  "prd_selectors": [
+                    "h3.3",
+                    "h2.12"
+                  ]
                 }
               ]
             }
@@ -352,8 +457,13 @@
                   "status": "Planned",
                   "story_points": 2,
                   "dependencies": [],
-                  "prd_selectors": ["h2.8", "h3.13", "h3.14", "h2.9"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §3 — TPM sources tmux-2html.tmux at load. Read user options via `tmux show-option -gqv @tmux-2html-<name>`. Resolve `TMUX_2HTML_BIN` (default `$TMUX_PLUGIN_MANAGER_PATH/tmux-2html/bin`). If binary missing/stale → `run-shell scripts/ensure_binary.sh`; on failure → `display-message` error + manual instructions + skip binding (PRD §9.1 step 2, §10 step 4).\n2. INPUT: PRD §9.2 options table (full-key=O, region-key=C-o, visible-key=empty, output-dir, open=on, font, history-limit=50000, binary-dir).\n3. LOGIC: tmux-2html.tmux (POSIX sh): resolve BIN; run ensure_binary.sh if needed; read each option with a default fallback (`tmux show-option -gqv @tmux-2html-font || echo monospace` style); export them for the binding generation. Guard so a missing binary doesn't crash the user's tmux.\n4. OUTPUT: sourcing the plugin under TPM sets up BIN + options without errors; options are overridable by the user.\n5. DOCS: [Mode A] this subtask CREATES `docs/CONFIGURATION.md` documenting the full @tmux-2html-* options table (defaults + meanings + the C-o override note PRD §9.2). This is the primary config doc surface (§5 Mode A)."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §3 — TPM sources tmux-2html.tmux at load. Read user options via `tmux show-option -gqv @tmux-2html-<name>`. Resolve `TMUX_2HTML_BIN` (default `$TMUX_PLUGIN_MANAGER_PATH/tmux-2html/bin`). If binary missing/stale → `run-shell scripts/ensure_binary.sh`; on failure → `display-message` error + manual instructions + skip binding (PRD §9.1 step 2, §10 step 4).\n2. INPUT: PRD §9.2 options table (full-key=O, region-key=C-o, visible-key=empty, output-dir, open=on, font, history-limit=50000, binary-dir).\n3. LOGIC: tmux-2html.tmux (POSIX sh): resolve BIN; run ensure_binary.sh if needed; read each option with a default fallback (`tmux show-option -gqv @tmux-2html-font || echo monospace` style); export them for the binding generation. Guard so a missing binary doesn't crash the user's tmux.\n4. OUTPUT: sourcing the plugin under TPM sets up BIN + options without errors; options are overridable by the user.\n5. DOCS: [Mode A] this subtask CREATES `docs/CONFIGURATION.md` documenting the full @tmux-2html-* options table (defaults + meanings + the C-o override note PRD §9.2). This is the primary config doc surface (§5 Mode A).",
+                  "prd_selectors": [
+                    "h2.8",
+                    "h3.13",
+                    "h3.14",
+                    "h2.9"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -361,9 +471,15 @@
                   "title": "One-time palette auto-sync popup trigger",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M2.T2.S1", "P2.M2.T1.S1"],
-                  "prd_selectors": ["h2.5", "h3.13"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 — on first load, if no palette cache exists, open `tmux display-popup` (real pty so OSC works) running `tmux-2html sync-palette`, then close. Runs once; skipped while the cache exists. The popup provides the controlling tty that run-shell lacks.\n2. INPUT: cache path (from palette.zig convention); sync-palette subcommand (P1.M2.T2.S1).\n3. LOGIC: In tmux-2html.tmux, after options: `if [ ! -f \"$cache\" ]; then tmux display-popup -E -w 50% -h 50% \"$BIN/tmux-2html sync-palette\"; fi`. (Wrap in a short popup, not 100%.) Non-fatal if it fails.\n4. OUTPUT: a fresh install pops the sync once; subsequent loads skip it.\n5. DOCS: [Mode A] note this auto-sync behavior (and that running sync-palette outside tmux captures the outer terminal palette) in docs/CONFIGURATION.md §Palette (extends P2.M2.T1.S1)."
+                  "dependencies": [
+                    "P1.M2.T2.S1",
+                    "P2.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §6 — on first load, if no palette cache exists, open `tmux display-popup` (real pty so OSC works) running `tmux-2html sync-palette`, then close. Runs once; skipped while the cache exists. The popup provides the controlling tty that run-shell lacks.\n2. INPUT: cache path (from palette.zig convention); sync-palette subcommand (P1.M2.T2.S1).\n3. LOGIC: In tmux-2html.tmux, after options: `if [ ! -f \"$cache\" ]; then tmux display-popup -E -w 50% -h 50% \"$BIN/tmux-2html sync-palette\"; fi`. (Wrap in a short popup, not 100%.) Non-fatal if it fails.\n4. OUTPUT: a fresh install pops the sync once; subsequent loads skip it.\n5. DOCS: [Mode A] note this auto-sync behavior (and that running sync-palette outside tmux captures the outer terminal palette) in docs/CONFIGURATION.md §Palette (extends P2.M2.T1.S1).",
+                  "prd_selectors": [
+                    "h2.5",
+                    "h3.13"
+                  ]
                 }
               ]
             },
@@ -380,9 +496,15 @@
                   "title": "O (full) + visible bindings (run-shell pane)",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P2.M2.T1.S1", "P2.M1.T2.S1"],
-                  "prd_selectors": ["h3.15", "h2.8"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §9.3 — bindings pass `--target #{pane_id}` (tmux expands formats in run-shell), read output-dir/open/font/history from options, notify via `tmux display-message`. Bind in the prefix table: `bind-key O run-shell \"$BIN/tmux-2html pane --full --target #{pane_id} --output-dir .. --font .. …\"`.\n2. INPUT: options from P2.M2.T1.S1; pane subcommand (P2.M1.T2.S1).\n3. LOGIC: Generate bind-key commands using the resolved options + `#{pane_id}`/`#{session_name}`. After render, `tmux display-message \"tmux-2html: wrote <file>\"`. Visible key only bound if @tmux-2html-visible-key is non-empty.\n4. OUTPUT: `prefix O` renders the full pane; visible key works if set.\n5. DOCS: none — keybinds documented in docs/CONFIGURATION.md (P2.M2.T1.S1) + final README."
+                  "dependencies": [
+                    "P2.M2.T1.S1",
+                    "P2.M1.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §9.3 — bindings pass `--target #{pane_id}` (tmux expands formats in run-shell), read output-dir/open/font/history from options, notify via `tmux display-message`. Bind in the prefix table: `bind-key O run-shell \"$BIN/tmux-2html pane --full --target #{pane_id} --output-dir .. --font .. …\"`.\n2. INPUT: options from P2.M2.T1.S1; pane subcommand (P2.M1.T2.S1).\n3. LOGIC: Generate bind-key commands using the resolved options + `#{pane_id}`/`#{session_name}`. After render, `tmux display-message \"tmux-2html: wrote <file>\"`. Visible key only bound if @tmux-2html-visible-key is non-empty.\n4. OUTPUT: `prefix O` renders the full pane; visible key works if set.\n5. DOCS: none — keybinds documented in docs/CONFIGURATION.md (P2.M2.T1.S1) + final README.",
+                  "prd_selectors": [
+                    "h3.15",
+                    "h2.8"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -390,9 +512,15 @@
                   "title": "C-o region binding (display-popup wrapper) + .last-output sidecar",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P2.M2.T1.S1"],
-                  "prd_selectors": ["h3.15", "h3.11", "h2.8"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §9.3 + §7.5 — region runs inside `tmux display-popup -E -w 100% -h 100%` (real pty). The popup has no tmux message channel, so the region path writes its result path to `$TMUX_2HTML_BIN/.last-output`; the wrapper then `tmux display-message` reads it. (The region binary itself is implemented in P3; this subtask only writes the binding+wrapper shell, which invokes `tmux-2html region` and is inert until P3 lands.)\n2. INPUT: options; region subcommand (exists after P3.M3.T1).\n3. LOGIC: `bind-key C-o run-shell \"<wrapper>\"` where wrapper does: `tmux display-popup -E -w 100% -h 100% \"$BIN/tmux-2html region --target #{pane_id} …\"`; after popup closes, `[ -f .last-output ] && tmux display-message \"tmux-2html: wrote $(cat .last-output)\"`. Honor the C-o override note (PRD §9.2).\n4. OUTPUT: `prefix C-o` opens the full-screen region overlay (renders the TUI once P3 is done; until then it runs the not-yet-complete region command).\n5. DOCS: none — keybind in docs + README."
+                  "dependencies": [
+                    "P2.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §9.3 + §7.5 — region runs inside `tmux display-popup -E -w 100% -h 100%` (real pty). The popup has no tmux message channel, so the region path writes its result path to `$TMUX_2HTML_BIN/.last-output`; the wrapper then `tmux display-message` reads it. (The region binary itself is implemented in P3; this subtask only writes the binding+wrapper shell, which invokes `tmux-2html region` and is inert until P3 lands.)\n2. INPUT: options; region subcommand (exists after P3.M3.T1).\n3. LOGIC: `bind-key C-o run-shell \"<wrapper>\"` where wrapper does: `tmux display-popup -E -w 100% -h 100% \"$BIN/tmux-2html region --target #{pane_id} …\"`; after popup closes, `[ -f .last-output ] && tmux display-message \"tmux-2html: wrote $(cat .last-output)\"`. Honor the C-o override note (PRD §9.2).\n4. OUTPUT: `prefix C-o` opens the full-screen region overlay (renders the TUI once P3 is done; until then it runs the not-yet-complete region command).\n5. DOCS: none — keybind in docs + README.",
+                  "prd_selectors": [
+                    "h3.15",
+                    "h3.11",
+                    "h2.8"
+                  ]
                 }
               ]
             }
@@ -419,8 +547,12 @@
                   "status": "Planned",
                   "story_points": 2,
                   "dependencies": [],
-                  "prd_selectors": ["h2.9", "h3.13", "h2.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — Step1: if `$BIN/tmux-2html` exists and `--version` matches plugin → done. Step2: if `zig` on PATH → `zig build --release=fast` into bin dir. Step3: else → scripts/download.sh. Step4: any failure → `tmux display-message \"tmux-2html: install failed (see README)\"` + skip binding. Atomic rename (never half-written). Plugin version comes from a baked constant in the plugin (must match binary --version).\n2. INPUT: $TMUX_2HTML_BIN, expected version string.\n3. LOGIC: POSIX sh script; `set -eu`; detect zig via command -v; build to a temp then mv into bin; on any error, message + exit non-zero (caller skips binding).\n4. OUTPUT: `scripts/ensure_binary.sh` produces a working binary or fails loudly.\n5. DOCS: none — install flow documented in README (P4.M2)."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — Step1: if `$BIN/tmux-2html` exists and `--version` matches plugin → done. Step2: if `zig` on PATH → `zig build --release=fast` into bin dir. Step3: else → scripts/download.sh. Step4: any failure → `tmux display-message \"tmux-2html: install failed (see README)\"` + skip binding. Atomic rename (never half-written). Plugin version comes from a baked constant in the plugin (must match binary --version).\n2. INPUT: $TMUX_2HTML_BIN, expected version string.\n3. LOGIC: POSIX sh script; `set -eu`; detect zig via command -v; build to a temp then mv into bin; on any error, message + exit non-zero (caller skips binding).\n4. OUTPUT: `scripts/ensure_binary.sh` produces a working binary or fails loudly.\n5. DOCS: none — install flow documented in README (P4.M2).",
+                  "prd_selectors": [
+                    "h2.9",
+                    "h3.13",
+                    "h2.10"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -428,9 +560,14 @@
                   "title": "download.sh: platform triple → fetch → SHA256 verify → atomic extract",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P2.M3.T1.S1"],
-                  "prd_selectors": ["h2.9", "h2.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — map `$(uname -sm)` to a triple: linux-x86_64, linux-aarch64, macos-x86_64, macos-arm64. Download `tmux-2html-<triple>.tar.xz` from latest GitHub release; verify against `SHA256SUMS.txt`; extract into bin dir (atomic). Checksum mismatch/offline → fail loudly, instruct to install Zig or place a binary manually.\n2. INPUT: the release asset naming from P4.M1 (CI produces these).\n3. LOGIC: detect arch/os → triple; `curl`/`wget` the tarball + SHA256SUMS.txt from the latest release; compute sha256 (shasum -a 256 / sha256sum); compare; `tar -xJ` to temp; mv binary into bin. Mismatch → exit non-zero with instructions.\n4. OUTPUT: `scripts/download.sh` installs a verified binary on all 4 platforms (tested with mocked SHA256SUMS).\n5. MOCKING: test under a faked release dir (local file:// or fixtures) to verify checksum pass + mismatch failure. DOCS: none — README."
+                  "dependencies": [
+                    "P2.M3.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — map `$(uname -sm)` to a triple: linux-x86_64, linux-aarch64, macos-x86_64, macos-arm64. Download `tmux-2html-<triple>.tar.xz` from latest GitHub release; verify against `SHA256SUMS.txt`; extract into bin dir (atomic). Checksum mismatch/offline → fail loudly, instruct to install Zig or place a binary manually.\n2. INPUT: the release asset naming from P4.M1 (CI produces these).\n3. LOGIC: detect arch/os → triple; `curl`/`wget` the tarball + SHA256SUMS.txt from the latest release; compute sha256 (shasum -a 256 / sha256sum); compare; `tar -xJ` to temp; mv binary into bin. Mismatch → exit non-zero with instructions.\n4. OUTPUT: `scripts/download.sh` installs a verified binary on all 4 platforms (tested with mocked SHA256SUMS).\n5. MOCKING: test under a faked release dir (local file:// or fixtures) to verify checksum pass + mismatch failure. DOCS: none — README.",
+                  "prd_selectors": [
+                    "h2.9",
+                    "h2.10"
+                  ]
                 }
               ]
             }
@@ -465,9 +602,14 @@
                   "title": "Alt-screen + raw termios + panic-safe restore + event loop",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M2.T1.S1"],
-                  "prd_selectors": ["h3.7", "h2.6"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §1 — VERIFIED termios API (from term2html terminal.zig): `std.posix.tcgetattr(fd)`, `tcsetattr(fd, .FLUSH, raw)`, fields `lflag.ICANON/ECHO`, `iflag.IXON/ICRNL/BRKINT`, `oflag.OPOST`, `cc[std.posix.system.V.MIN/TIME]`. Alt screen `\\x1b[?1049h`, hide cursor `\\x1b[?25l`; restore in a `defer` AND a panic/signal handler (PRD §7.1 'restore always').\n2. INPUT: stdin/stdout handles (the display-popup pty).\n3. LOGIC: `pub fn enter() !State` (writes enter sequences, sets raw, returns saved original); `pub fn exit(state)` (restore). A `run(model, view, input)` loop that reads bytes until quit/confirm. Register a SIGINT/SIGTERM + panic handler that calls exit.\n4. OUTPUT: a function that takes over the screen and always restores it (tested by checking termios restored after early return).\n5. DOCS: none — internal."
+                  "dependencies": [
+                    "P1.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §1 — VERIFIED termios API (from term2html terminal.zig): `std.posix.tcgetattr(fd)`, `tcsetattr(fd, .FLUSH, raw)`, fields `lflag.ICANON/ECHO`, `iflag.IXON/ICRNL/BRKINT`, `oflag.OPOST`, `cc[std.posix.system.V.MIN/TIME]`. Alt screen `\\x1b[?1049h`, hide cursor `\\x1b[?25l`; restore in a `defer` AND a panic/signal handler (PRD §7.1 'restore always').\n2. INPUT: stdin/stdout handles (the display-popup pty).\n3. LOGIC: `pub fn enter() !State` (writes enter sequences, sets raw, returns saved original); `pub fn exit(state)` (restore). A `run(model, view, input)` loop that reads bytes until quit/confirm. Register a SIGINT/SIGTERM + panic handler that calls exit.\n4. OUTPUT: a function that takes over the screen and always restores it (tested by checking termios restored after early return).\n5. DOCS: none — internal.",
+                  "prd_selectors": [
+                    "h3.7",
+                    "h2.6"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -475,9 +617,14 @@
                   "title": "Mouse mode enable + SGR mouse decode + input byte read",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P3.M1.T1.S1"],
-                  "prd_selectors": ["h3.12", "h3.7"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §2 — enable `\\x1b[?1000h\\x1b[?1002h\\x1b[?1006h` on enter, disable on exit. SGR events: `\\x1b[<{b};{x};{y}M` (press/move) / `m` (release). b: 0/1/2=left/mid/right, motion has bit 32, wheel 64/65; Alt modifier (b&8 or 16) → block drag.\n2. INPUT: raw byte stream from the loop.\n3. LOGIC: A `readEvent(reader) !Event` that distinguishes: ESC sequences (dispatch to key decoder P3.M2.T1.S1), mouse (`\\x1b[<`), and plain keys. Return a tagged Event union.\n4. OUTPUT: typed `Event` stream consumed by the input/select layer.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M1.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §2 — enable `\\x1b[?1000h\\x1b[?1002h\\x1b[?1006h` on enter, disable on exit. SGR events: `\\x1b[<{b};{x};{y}M` (press/move) / `m` (release). b: 0/1/2=left/mid/right, motion has bit 32, wheel 64/65; Alt modifier (b&8 or 16) → block drag.\n2. INPUT: raw byte stream from the loop.\n3. LOGIC: A `readEvent(reader) !Event` that distinguishes: ESC sequences (dispatch to key decoder P3.M2.T1.S1), mouse (`\\x1b[<`), and plain keys. Return a tagged Event union.\n4. OUTPUT: typed `Event` stream consumed by the input/select layer.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.12",
+                    "h3.7"
+                  ]
                 }
               ]
             },
@@ -494,9 +641,14 @@
                   "title": "Render grid in color via SGR + palette + cursor-addressed diff",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P3.M1.T1.S1"],
-                  "prd_selectors": ["h3.7", "h2.6"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §5 + render_pipeline §2 — colors match the pane via the cached palette; re-emit SGR per cell run. Use cursor addressing `\\x1b[<row>;<col>H`. Cap rendered rows to the viewport; scroll with the cursor. v1 may full-repaint per keystroke (optimize later).\n2. INPUT: the loaded grid (Terminal screen from the captured scrollback), viewport size, cursor pos, palette Colors.\n3. LOGIC: `pub fn render(out, grid, palette, viewport, cursor, selection, matches) !void` — paints visible rows, inverts/highlights selection range and search matches.\n4. OUTPUT: the TUI shows the pane content in color matching the cached palette.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M1.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §5 + render_pipeline §2 — colors match the pane via the cached palette; re-emit SGR per cell run. Use cursor addressing `\\x1b[<row>;<col>H`. Cap rendered rows to the viewport; scroll with the cursor. v1 may full-repaint per keystroke (optimize later).\n2. INPUT: the loaded grid (Terminal screen from the captured scrollback), viewport size, cursor pos, palette Colors.\n3. LOGIC: `pub fn render(out, grid, palette, viewport, cursor, selection, matches) !void` — paints visible rows, inverts/highlights selection range and search matches.\n4. OUTPUT: the TUI shows the pane content in color matching the cached palette.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.7",
+                    "h2.6"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -504,9 +656,15 @@
                   "title": "Status line (copy-mode style) + viewport scroll + match highlight",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P3.M1.T2.S1"],
-                  "prd_selectors": ["h3.7", "h3.9", "h3.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.1 status line: `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>Enter=render q=quit`. H/M/L scroll the viewport; search matches highlighted.\n2. INPUT: selection mode, cursor (row/col), search pattern + match count.\n3. LOGIC: paint the last row as the status line; ensure the cursor stays visible (recenter on H/M/L / half/full-page scrolls).\n4. OUTPUT: status line reflects live state; matches highlighted.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M1.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.1 status line: `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>Enter=render q=quit`. H/M/L scroll the viewport; search matches highlighted.\n2. INPUT: selection mode, cursor (row/col), search pattern + match count.\n3. LOGIC: paint the last row as the status line; ensure the cursor stays visible (recenter on H/M/L / half/full-page scrolls).\n4. OUTPUT: status line reflects live state; matches highlighted.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.7",
+                    "h3.9",
+                    "h3.10"
+                  ]
                 }
               ]
             }
@@ -532,9 +690,14 @@
                   "title": "Key-sequence decoder (arrows, Ctrl-mods, vim keys) + count prefix",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P3.M1.T1.S2"],
-                  "prd_selectors": ["h3.8", "h3.7"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §3 — decode ESC-prefixed sequences (`\\x1b[A/B/C/D`=arrows, `\\x1b[1;5D`=Ctrl-arrow, `\\x1b[H/F`, `\\x1b[5/6~`=PgUp/Dn) then plain keys. Parse leading-digit counts (`5j`).\n2. INPUT: Event stream from app.zig.\n3. LOGIC: `decode(reader) !Key` returning a normalized Key (motion | action | search-start). Maintain a count register.\n4. OUTPUT: normalized Key values for the motion engine.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M1.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tui_region.md §3 — decode ESC-prefixed sequences (`\\x1b[A/B/C/D`=arrows, `\\x1b[1;5D`=Ctrl-arrow, `\\x1b[H/F`, `\\x1b[5/6~`=PgUp/Dn) then plain keys. Parse leading-digit counts (`5j`).\n2. INPUT: Event stream from app.zig.\n3. LOGIC: `decode(reader) !Key` returning a normalized Key (motion | action | search-start). Maintain a count register.\n4. OUTPUT: normalized Key values for the motion engine.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.8",
+                    "h3.7"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -542,9 +705,14 @@
                   "title": "Vim motions (hjkl/wbe/0^$/ggG/Ctrl-dufb/HML/{}/%) + search (/ ? n N)",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P3.M2.T1.S1"],
-                  "prd_selectors": ["h3.8", "h3.9"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.2 — `h j k l ← ↓ ↑ →`, `w b e`, `0 ^ $`, `g g`/`G`, `Ctrl-d/u` half-page, `Ctrl-f/b` full-page, `H M L`, `{ }`, `%`, counts. §7.3 — `/pattern` fwd, `?pattern` back, `n`/`N`. regex or fixed-string (configurable).\n2. INPUT: Key + count; grid dimensions + decoded per-row cell text (strip SGR for matching).\n3. LOGIC: Apply motions to a cursor model (with viewport side-effects); implement search scan producing a match list + next/prev movement. `%` matches brackets; `{}` paragraph jumps over blank lines.\n4. OUTPUT: cursor moves correctly; search navigates matches.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.2 — `h j k l ← ↓ ↑ →`, `w b e`, `0 ^ $`, `g g`/`G`, `Ctrl-d/u` half-page, `Ctrl-f/b` full-page, `H M L`, `{ }`, `%`, counts. §7.3 — `/pattern` fwd, `?pattern` back, `n`/`N`. regex or fixed-string (configurable).\n2. INPUT: Key + count; grid dimensions + decoded per-row cell text (strip SGR for matching).\n3. LOGIC: Apply motions to a cursor model (with viewport side-effects); implement search scan producing a match list + next/prev movement. `%` matches brackets; `{}` paragraph jumps over blank lines.\n4. OUTPUT: cursor moves correctly; search navigates matches.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.8",
+                    "h3.9"
+                  ]
                 }
               ]
             },
@@ -561,9 +729,13 @@
                   "title": "Selection model: linewise/block, v-toggle, o/O, anchor/cursor",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P3.M2.T1.S1"],
-                  "prd_selectors": ["h3.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.4 — `v` begins Linewise at cursor (anchor=cursor); `v` again toggles Linewise↔Block. `V` Linewise, `Ctrl-v`/`R` Block. `o`/`O` swap cursor to other end. `Esc` clears (stay in TUI); movement extends selection anchor→cursor.\n2. INPUT: cursor model from input.zig.\n3. LOGIC: `pub const Mode = enum { none, linewise, block };` `pub const Sel = struct { anchor, cursor, mode }` + methods `toggle()`, `swapEnds()`, `clear()`, `active()`. Selection visible extent is min/max of anchor/cursor (either order).\n4. OUTPUT: Sel drives view highlights + feeds conversion in S2.\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.4 — `v` begins Linewise at cursor (anchor=cursor); `v` again toggles Linewise↔Block. `V` Linewise, `Ctrl-v`/`R` Block. `o`/`O` swap cursor to other end. `Esc` clears (stay in TUI); movement extends selection anchor→cursor.\n2. INPUT: cursor model from input.zig.\n3. LOGIC: `pub const Mode = enum { none, linewise, block };` `pub const Sel = struct { anchor, cursor, mode }` + methods `toggle()`, `swapEnds()`, `clear()`, `active()`. Selection visible extent is min/max of anchor/cursor (either order).\n4. OUTPUT: Sel drives view highlights + feeds conversion in S2.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.10"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -571,9 +743,15 @@
                   "title": "Coordinate → Selection (pin) conversion; clamp + wide-cell rounding",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P3.M2.T2.S1", "P1.M4.T1.S1"],
-                  "prd_selectors": ["h3.10", "h2.12"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.2 + render_pipeline.md §4 — REUSE the exact recipe from P1.M4.T1.S1. Linewise → pin(x=0,r1)..pin(cols-1,r2), rect=false; Block → pin(c1,r1)..pin(c2,r2), rect=true. PRD §13: wide cells selected atomically (round to cell boundaries; clamp to grid).\n2. INPUT: Sel from S1 + the loaded screen's pages.\n3. LOGIC: `toGhosttySelection(sel, screen, cols) Selection` — clamp coords to [0,cols-1]/[0,rows-1], normalize order, build via Selection.init(screen.pages.pin(pt)...).  Deinit by caller.\n4. OUTPUT: a ghostty Selection handed to renderGrid on confirm (P3.M3.T1.S2).\n5. DOCS: none."
+                  "dependencies": [
+                    "P3.M2.T2.S1",
+                    "P1.M4.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §0.2 + render_pipeline.md §4 — REUSE the exact recipe from P1.M4.T1.S1. Linewise → pin(x=0,r1)..pin(cols-1,r2), rect=false; Block → pin(c1,r1)..pin(c2,r2), rect=true. PRD §13: wide cells selected atomically (round to cell boundaries; clamp to grid).\n2. INPUT: Sel from S1 + the loaded screen's pages.\n3. LOGIC: `toGhosttySelection(sel, screen, cols) Selection` — clamp coords to [0,cols-1]/[0,rows-1], normalize order, build via Selection.init(screen.pages.pin(pt)...).  Deinit by caller.\n4. OUTPUT: a ghostty Selection handed to renderGrid on confirm (P3.M3.T1.S2).\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.10",
+                    "h2.12"
+                  ]
                 }
               ]
             }
@@ -599,9 +777,15 @@
                   "title": "region.zig: capture full scrollback → grid → launch TUI",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P2.M1.T1.S2", "P3.M1.T2.S2"],
-                  "prd_selectors": ["h3.4", "h2.6"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.3 + tui_region.md §8 — region reads the FULL scrollback (capture full mode, honoring --history cap) into the grid FIRST so the TUI browses all history. The TUI works purely on the in-memory grid + the display-popup pty.\n2. INPUT: RegionOpts (P1.M1.T3.S2); capture (P2.M1.T1.S2); TUI app/view/input/select (P3.M1/P3.M2).\n3. LOGIC: region(opts): resolve target; capture full → Captured; colors = palette.resolve(cached→…, has_tty=true since display-popup gives a real pty); build the grid; enter TUI; hand control to the app loop with the grid + colors.\n4. OUTPUT: `tmux-2html region` (inside a display-popup) shows the full colored scrollback in the TUI.\n5. DOCS: none."
+                  "dependencies": [
+                    "P2.M1.T1.S2",
+                    "P3.M1.T2.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §5.3 + tui_region.md §8 — region reads the FULL scrollback (capture full mode, honoring --history cap) into the grid FIRST so the TUI browses all history. The TUI works purely on the in-memory grid + the display-popup pty.\n2. INPUT: RegionOpts (P1.M1.T3.S2); capture (P2.M1.T1.S2); TUI app/view/input/select (P3.M1/P3.M2).\n3. LOGIC: region(opts): resolve target; capture full → Captured; colors = palette.resolve(cached→…, has_tty=true since display-popup gives a real pty); build the grid; enter TUI; hand control to the app loop with the grid + colors.\n4. OUTPUT: `tmux-2html region` (inside a display-popup) shows the full colored scrollback in the TUI.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h3.4",
+                    "h2.6"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -609,9 +793,17 @@
                   "title": "Confirm/cancel → renderGrid(selection) + .last-output sidecar + output filename",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P3.M3.T1.S1", "P3.M2.T2.S2", "P1.M3.T1.S1"],
-                  "prd_selectors": ["h3.11", "h3.15", "h2.12"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.5 — `Enter`/`y`: if selection empty → warn, no file, exit 1; else render selection → HTML to --output (or output-dir/session-timestamp-pid), --open if set, write path to `$TMUX_2HTML_BIN/.last-output` for the wrapper (P2.M2.T2.S2) to display-message. `q`/`Esc`(no sel)/`Ctrl-c` → exit 1, no output.\n2. INPUT: Sel→Selection (P3.M2.T2.S2); renderGrid (P1.M3.T1.S1); TUI exit signal.\n3. LOGIC: On confirm: sel = toGhosttySelection(...); renderGrid(captured, colors, sel, font, output-file); write `.last-output`; exit 0. On cancel: exit 1, no file. Restore terminal (app.exit) in both paths.\n4. OUTPUT: `prefix C-o` → select → Enter produces an HTML file of exactly the selection and tmux messages the path.\n5. DOCS: none — covered by docs + README."
+                  "dependencies": [
+                    "P3.M3.T1.S1",
+                    "P3.M2.T2.S2",
+                    "P1.M3.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §7.5 — `Enter`/`y`: if selection empty → warn, no file, exit 1; else render selection → HTML to --output (or output-dir/session-timestamp-pid), --open if set, write path to `$TMUX_2HTML_BIN/.last-output` for the wrapper (P2.M2.T2.S2) to display-message. `q`/`Esc`(no sel)/`Ctrl-c` → exit 1, no output.\n2. INPUT: Sel→Selection (P3.M2.T2.S2); renderGrid (P1.M3.T1.S1); TUI exit signal.\n3. LOGIC: On confirm: sel = toGhosttySelection(...); renderGrid(captured, colors, sel, font, output-file); write `.last-output`; exit 0. On cancel: exit 1, no file. Restore terminal (app.exit) in both paths.\n4. OUTPUT: `prefix C-o` → select → Enter produces an HTML file of exactly the selection and tmux messages the path.\n5. DOCS: none — covered by docs + README.",
+                  "prd_selectors": [
+                    "h3.11",
+                    "h3.15",
+                    "h2.12"
+                  ]
                 }
               ]
             }
@@ -646,9 +838,15 @@
                   "title": "4-target matrix build + tar.xz + SHA256SUMS + draft release",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T1.S2", "P1.M4.T2.S1"],
-                  "prd_selectors": ["h2.10", "h2.11"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §3 — VERIFIED term2html build-binaries.yml shape. Use mlugg/setup-zig@v2 (version 0.15.2), `zig build --fetch` then `zig build -Doptimize=ReleaseFast -Dtarget=<triple> [-Dsimd=false]`, env ZIG_HTTP_MAX_CONNS=1. Cross targets: x86_64-linux-gnu, aarch64-linux-gnu (-Dsimd=false), x86_64-macos (-Dsimd=false), aarch64-macos. Package as tmux-2html-<triple>.tar.xz + SHA256SUMS.txt; softprops/action-gh-release@2 draft.\n2. INPUT: build.zig (P1.M1.T1.S2); the asset naming expected by scripts/download.sh (P2.M3.T1.S2).\n3. LOGIC: on tag v* run the matrix; native arm64 runners preferred, cross elsewhere; generate SHA256SUMS.txt per the PRD §10 naming (linux-x86_64 etc.); upload tarballs + sums to the draft release.\n4. OUTPUT: a tagged release publishes 4 verified tarballs + SHA256SUMS that download.sh consumes.\n5. DOCS: none — release infra."
+                  "dependencies": [
+                    "P1.M1.T1.S2",
+                    "P1.M4.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: external_deps.md §3 — VERIFIED term2html build-binaries.yml shape. Use mlugg/setup-zig@v2 (version 0.15.2), `zig build --fetch` then `zig build -Doptimize=ReleaseFast -Dtarget=<triple> [-Dsimd=false]`, env ZIG_HTTP_MAX_CONNS=1. Cross targets: x86_64-linux-gnu, aarch64-linux-gnu (-Dsimd=false), x86_64-macos (-Dsimd=false), aarch64-macos. Package as tmux-2html-<triple>.tar.xz + SHA256SUMS.txt; softprops/action-gh-release@2 draft.\n2. INPUT: build.zig (P1.M1.T1.S2); the asset naming expected by scripts/download.sh (P2.M3.T1.S2).\n3. LOGIC: on tag v* run the matrix; native arm64 runners preferred, cross elsewhere; generate SHA256SUMS.txt per the PRD §10 naming (linux-x86_64 etc.); upload tarballs + sums to the draft release.\n4. OUTPUT: a tagged release publishes 4 verified tarballs + SHA256SUMS that download.sh consumes.\n5. DOCS: none — release infra.",
+                  "prd_selectors": [
+                    "h2.10",
+                    "h2.11"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -656,9 +854,14 @@
                   "title": "CI test job (ReleaseFast) — run golden + unit tests",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M4.T2.S1"],
-                  "prd_selectors": ["h2.14", "h2.10"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 — `zig build test` hits a Debug-mode linker bug (R_X86_64_PC64) with the C++ SIMD libs; run tests in ReleaseFast (`zig build test -Doptimize=ReleaseFast`) or track upstream.\n2. INPUT: the test suite (P1.M4).\n3. LOGIC: a CI job (on push/PR) that runs `zig build test -Doptimize=ReleaseFast` on linux + macos; fail the build on test failure.\n4. OUTPUT: PRs are gated on green ReleaseFast tests.\n5. DOCS: none."
+                  "dependencies": [
+                    "P1.M4.T2.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 — `zig build test` hits a Debug-mode linker bug (R_X86_64_PC64) with the C++ SIMD libs; run tests in ReleaseFast (`zig build test -Doptimize=ReleaseFast`) or track upstream.\n2. INPUT: the test suite (P1.M4).\n3. LOGIC: a CI job (on push/PR) that runs `zig build test -Doptimize=ReleaseFast` on linux + macos; fail the build on test failure.\n4. OUTPUT: PRs are gated on green ReleaseFast tests.\n5. DOCS: none.",
+                  "prd_selectors": [
+                    "h2.14",
+                    "h2.10"
+                  ]
                 }
               ]
             }
@@ -684,9 +887,30 @@
                   "title": "README.md: install, modes, keybinds, options summary, credits",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T3.S2", "P1.M2.T2.S1", "P1.M3.T1.S3", "P1.M4.T2.S2", "P2.M1.T2.S1", "P2.M2.T1.S1", "P2.M2.T2.S2", "P2.M3.T1.S2", "P3.M1.T2.S2", "P3.M2.T2.S2", "P3.M3.T1.S2", "P4.M1.T1.S2"],
-                  "prd_selectors": ["h2.0", "h2.4", "h2.6", "h2.8", "h2.12", "h2.13", "h2.16"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: §5 Mode B — this is the whole-feature overview doc. It depends on all implementing subtasks because it summarizes the complete, coherent delta. Use the write-tech-docs conventions (no marketing tell-words, no em dashes, no hedging).\n2. INPUT: the finished product across P1–P4 (every subtask it depends on). PRD §1/§4/§7/§9/§13/§16 for content; docs/CONFIGURATION.md (created in P2.M2.T1.S1) for the options detail.\n3. LOGIC: Create README.md covering: what it is; install via TPM (set -g @plugin 'tmux-2html/tmux-2html'); prerequisites (tmux ≥3.2; Zig only if building from source); the three capture modes; keybinds (O/C-o/visible); a pointer to docs/CONFIGURATION.md for all @tmux-2html-* options; known limitations (alt-screen capture §13, huge scrollback cap); credits + MIT license noting retained term2html + ghostty notices (PRD §14).\n4. OUTPUT: a README that matches the shipped capabilities; no stale claims.\n5. DOCS: [Mode B] this IS the docs task."
+                  "dependencies": [
+                    "P1.M1.T3.S2",
+                    "P1.M2.T2.S1",
+                    "P1.M3.T1.S3",
+                    "P1.M4.T2.S2",
+                    "P2.M1.T2.S1",
+                    "P2.M2.T1.S1",
+                    "P2.M2.T2.S2",
+                    "P2.M3.T1.S2",
+                    "P3.M1.T2.S2",
+                    "P3.M2.T2.S2",
+                    "P3.M3.T1.S2",
+                    "P4.M1.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: §5 Mode B — this is the whole-feature overview doc. It depends on all implementing subtasks because it summarizes the complete, coherent delta. Use the write-tech-docs conventions (no marketing tell-words, no em dashes, no hedging).\n2. INPUT: the finished product across P1–P4 (every subtask it depends on). PRD §1/§4/§7/§9/§13/§16 for content; docs/CONFIGURATION.md (created in P2.M2.T1.S1) for the options detail.\n3. LOGIC: Create README.md covering: what it is; install via TPM (set -g @plugin 'tmux-2html/tmux-2html'); prerequisites (tmux ≥3.2; Zig only if building from source); the three capture modes; keybinds (O/C-o/visible); a pointer to docs/CONFIGURATION.md for all @tmux-2html-* options; known limitations (alt-screen capture §13, huge scrollback cap); credits + MIT license noting retained term2html + ghostty notices (PRD §14).\n4. OUTPUT: a README that matches the shipped capabilities; no stale claims.\n5. DOCS: [Mode B] this IS the docs task.",
+                  "prd_selectors": [
+                    "h2.0",
+                    "h2.4",
+                    "h2.6",
+                    "h2.8",
+                    "h2.12",
+                    "h2.13",
+                    "h2.16"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -694,9 +918,18 @@
                   "title": "docs/ overview sweep: known limitations, sync-palette, region usage",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P4.M2.T1.S1", "P1.M2.T2.S1", "P3.M3.T1.S2"],
-                  "prd_selectors": ["h2.5", "h2.6", "h2.12", "h2.13"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: §5 Mode B — cross-cutting overview docs. Ensure docs/CONFIGURATION.md (Mode A, created earlier) has a coherent top-level overview; add any whole-changeset sections (region usage walkthrough, edge-case/limits summary PRD §13, licensing PRD §14).\n2. INPUT: all implementing subtasks + the README (S1).\n3. LOGIC: Review docs/CONFIGURATION.md and add/verify: region TUI usage, sync-palette in-vs-out-of-tmux behavior, edge cases (alt-screen, scrollback cap, OSC8, wide chars), attribution. Fix any drift between docs and actual flags.\n4. OUTPUT: docs/ accurately reflect the shipped CLI/plugin.\n5. DOCS: [Mode B] this IS the docs task."
+                  "dependencies": [
+                    "P4.M2.T1.S1",
+                    "P1.M2.T2.S1",
+                    "P3.M3.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: §5 Mode B — cross-cutting overview docs. Ensure docs/CONFIGURATION.md (Mode A, created earlier) has a coherent top-level overview; add any whole-changeset sections (region usage walkthrough, edge-case/limits summary PRD §13, licensing PRD §14).\n2. INPUT: all implementing subtasks + the README (S1).\n3. LOGIC: Review docs/CONFIGURATION.md and add/verify: region TUI usage, sync-palette in-vs-out-of-tmux behavior, edge cases (alt-screen, scrollback cap, OSC8, wide chars), attribution. Fix any drift between docs and actual flags.\n4. OUTPUT: docs/ accurately reflect the shipped CLI/plugin.\n5. DOCS: [Mode B] this IS the docs task.",
+                  "prd_selectors": [
+                    "h2.5",
+                    "h2.6",
+                    "h2.12",
+                    "h2.13"
+                  ]
                 }
               ]
             }
