@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Project Skeleton, Build System & CLI Dispatch",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Create the Zig 0.15.2 project, declare ghostty v1.3.1 + parg dependencies, vendor the term2html formatter, and stand up subcommand dispatch so `--version`/`--help` and the four subcommands route correctly.",
           "tasks": [
             {
@@ -84,14 +84,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "CLI entrypoint & subcommand dispatch",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Stand up `src/main.zig` (dispatch render|pane|region|sync-palette, plus --version/--help) and `src/cli.zig` (parg-based flag parser with a subcommand peek, since parg has no native subcommands).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "main.zig: subcommand dispatch + --version/--help",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1"
@@ -106,7 +106,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T3.S2",
                   "title": "cli.zig: parg flag/option parser for all subcommands",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T3.S1"
