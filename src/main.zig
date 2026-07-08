@@ -137,6 +137,13 @@ fn printHelp(out: std.fs.File) !void {
     try out.writeAll(usage_text);
 }
 
+test {
+    // P1.M2: keep palette.zig tests reachable from the test root (src/main.zig).
+    // A top-level test block is compiled ONLY in test mode, so ghostty-vt stays
+    // LAZY for a normal `zig build` (no palette import on the exe path).
+    _ = @import("palette.zig");
+}
+
 test "dispatch routes known subcommand to cli stub" {
     // Known subcommand reaches the cli stub, which reports NotImplemented.
     const allocator = std.testing.allocator;
