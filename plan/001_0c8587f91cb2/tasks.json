@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Zig build system (build.zig + build.zig.zon)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Create the build that fetches ghostty + parg, wires the `ghostty-vt` module, bakes in the version, and exposes `-Dsimd`.",
               "subtasks": [
                 {
@@ -40,7 +40,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "build.zig wiring (ghostty-vt module, version, -Dsimd, test step)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -59,14 +59,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Vendored formatter & licensing notices",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Copy term2html's modified `ghostty_format.zig` (which adds the `font` option) into the tree, and create the MIT license + upstream attribution files.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Vendor ghostty_format.zig (with font option) + LICENSE + licenses/ notices",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S2"
