@@ -128,14 +128,14 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Palette Subsystem (palette.zig + sync-palette)",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Absorb term2html's OSC color query into `src/palette.zig`, add the XDG cache (PRD §6), implement precedence (cached→live→default), and wire the `sync-palette` subcommand.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "palette.zig: queryColors + cache + resolve",
-              "status": "Planned",
+              "status": "Ready",
               "description": "The palette module: OSC 4/10/11 query against /dev/tty, cache file read/write, and precedence resolution.",
               "subtasks": [
                 {
@@ -157,7 +157,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T1.S2",
                   "title": "Palette cache read/write (XDG path, plain-text format)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1"
@@ -172,7 +172,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T1.S3",
                   "title": "palette.resolve() precedence (cached → live → default)",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S2"
@@ -188,14 +188,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "sync-palette subcommand",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Wire PRD §5.4: query + cache the palette, with --from and --force.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "sync-palette command (--from, --force) → writeCache",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S3",
