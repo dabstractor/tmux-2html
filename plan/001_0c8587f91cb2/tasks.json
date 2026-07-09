@@ -216,14 +216,14 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Core Renderer (render subcommand: ANSI → HTML)",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Implement `src/render.zig` exposing the shared render primitive used by ALL capture paths: feed ANSI into a sized ghostty Terminal → ScreenFormatter → HTML. Deliver the `render` subcommand with sizing, font, output, open, and palette flags.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "render.zig core pipeline + options",
-              "status": "Planned",
+              "status": "Ready",
               "description": "The shared renderer: Terminal→vtStream→ScreenFormatter→HTML, with sizing/output/open/palette.",
               "subtasks": [
                 {
@@ -247,7 +247,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S2",
                   "title": "Sizing (--cols/--rows), --font, --output, --open",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1"
@@ -262,7 +262,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S3",
                   "title": "--palette MODE flag (cached→live→default via palette.resolve)",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1",
@@ -289,14 +289,14 @@
               "type": "Task",
               "id": "P1.M4.T1",
               "title": "render --selection (coordinate → Pin → Selection)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Implement PRD §5.1 `--selection X1,Y1,X2,Y2[,rect]` by translating grid coordinates to ghostty Pins and constructing a Selection.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T1.S1",
                   "title": "Coordinate → Pin → Selection construction + --selection flag",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M3.T1.S1"
