@@ -586,7 +586,7 @@
           "type": "Milestone",
           "id": "P3.M1",
           "title": "TUI App & View (Display Layer)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "The terminal control (tui/app.zig: alt-screen, raw termios, panic-safe restore, event loop, mouse) and rendering (tui/view.zig: render the grid in color, status line, viewport, highlights).",
           "tasks": [
             {
@@ -632,7 +632,7 @@
               "type": "Task",
               "id": "P3.M1.T2",
               "title": "tui/view.zig: colored grid + status line + viewport",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Render the captured grid in full color (diff-rendered with cursor addressing), the copy-mode status line, viewport scrolling, and search/selection highlights.",
               "subtasks": [
                 {
@@ -654,7 +654,7 @@
                   "type": "Subtask",
                   "id": "P3.M1.T2.S2",
                   "title": "Status line (copy-mode style) + viewport scroll + match highlight",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P3.M1.T2.S1"
@@ -688,7 +688,7 @@
                   "type": "Subtask",
                   "id": "P3.M2.T1.S1",
                   "title": "Key-sequence decoder (arrows, Ctrl-mods, vim keys) + count prefix",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P3.M1.T1.S2"

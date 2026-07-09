@@ -840,6 +840,12 @@ pub const PageFormatter = struct {
                 const font = self.opts.font orelse "monospace";
                 buf_writer.print("font-family: {s};", .{font}) catch return error.WriteFailed;
 
+                // 1ch right-side background buffer: the <pre> background covers its padding,
+                // so this adds exactly one cell-width of terminal bg beyond the last column.
+                // Keeps the rightmost glyph clear of the box edge (and any vertical scrollbar)
+                // so characters can't run over the border, even by 1px.
+                buf_writer.writeAll("padding-right: 1ch;") catch return error.WriteFailed;
+
                 buf_writer.writeAll("\">") catch return error.WriteFailed;
 
                 const header = stream.getWritten();
