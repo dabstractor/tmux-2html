@@ -373,14 +373,14 @@
               "type": "Task",
               "id": "P2.M1.T1",
               "title": "capture.zig: geometry + capture-pane invocation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Resolve pane size from tmux formats and shell out to capture-pane (PRD §2.1, §5.2).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M1.T1.S1",
                   "title": "Pane geometry + capture-pane command builder",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T3.S2"
@@ -395,7 +395,7 @@
                   "type": "Subtask",
                   "id": "P2.M1.T1.S2",
                   "title": "parse capture output → Captured; visible vs full; history cap + truncation notice",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1"
