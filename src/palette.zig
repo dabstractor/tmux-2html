@@ -428,6 +428,114 @@ pub fn loadCache(allocator: std.mem.Allocator) !Colors {
     return loadCacheDir(dir, std.fs.path.basename(path), allocator);
 }
 
+// ---- Resolve precedence (PRD §6) -------------------------------------------
+// The decision layer: which source to use, in what order, gated by tty availability.
+// CONSUMES S1 (queryColors/defaultColors) + S2 (cachePath/loadCacheDir). Infallible by
+// design (resolve returns Colors, never !Colors): every cachePath/loadCache/queryColors
+// error is swallowed and routed to the next lower source, bottoming at defaultColors().
+//
+// GOTCHA 1: resolve() returns Colors (NOT !Colors).
+// GOTCHA 2: queryColors() ERRORS without a controlling tty — gate on has_tty + catch.
+// GOTCHA 3/4: hasControllingTtyAt uses openFileAbsolute(.{}) (read-only, allow_ctty=false);
+//            /dev/tty open fails with ENXIO when there is NO controlling tty (run-shell).
+// GOTCHA 5: NO setenv in std => tests drive the dir-scoped resolveDir via tmpDir.
+// GOTCHA 7: path.dirname is nullable (?[]const u8) — handle with `orelse`.
+// GOTCHA 9: Mode is defined LOCALLY (palette.zig must NOT import cli.zig).
+
+/// Palette source selection (PRD §6 precedence). Mirrors cli.PaletteMode's three values
+/// but lives here so palette.zig does NOT import cli.zig (cli must stay ghostty-free).
+/// The renderer bridges cli.PaletteMode -> Mode with a 3-arm switch.
+pub const Mode = enum {
+    default, // bundled Ghostty palette (defaultColors) — ignores cache + tty.
+    cached, // loadCache, fall back to live(if tty) / default.
+    live, // queryColors(if tty), fall back to cached / default.
+
+    pub fn fromStr(s: []const u8) ?Mode {
+        if (std.mem.eql(u8, s, "default")) return .default;
+        if (std.mem.eql(u8, s, "cached")) return .cached;
+        if (std.mem.eql(u8, s, "live")) return .live;
+        return null;
+    }
+};
+
+/// Does this process have a controlling terminal? Probes the given absolute path
+/// read-only via openFileAbsolute(.{}) — mode=.read_only AND allow_ctty=false (File.zig
+/// defaults), so it never acquires a controlling tty. open() fails (ENXIO when there is
+/// no controlling tty) => false. Never panics. Module-private: hasControllingTty is the
+/// public wrapper over "/dev/tty".
+fn hasControllingTtyAt(path: []const u8) bool {
+    var f = std.fs.openFileAbsolute(path, .{}) catch return false;
+    f.close();
+    return true;
+}
+
+/// Does this process have a controlling terminal? Probes /dev/tty read-only (the POSIX
+/// idiom: open fails with ENXIO when there is no controlling tty — i.e. the entire tmux
+/// run-shell context, which is why the cache exists). Never acquires a controlling tty;
+/// never panics. Returns false under run-shell, in CI, behind pipes.
+pub fn hasControllingTty() bool {
+    return hasControllingTtyAt("/dev/tty");
+}
+
+/// Live-or-fallback: queryColors is ONLY attempted when has_tty; its error is swallowed
+/// and `fallback` is returned. (GOTCHA 2: queryColors errors without a controlling tty —
+/// that error is the designed signal resolve relies on for the live->cached->default path.)
+fn liveOr(allocator: std.mem.Allocator, has_tty: bool, fallback: Colors) Colors {
+    if (!has_tty) return fallback;
+    return queryColors(allocator) catch fallback;
+}
+
+/// The precedence core, dir-scoped so it's testable with std.testing.tmpDir (GOTCHA 5:
+/// no setenv in std). Returns Colors (no '!'); every loadCacheDir/queryColors error is
+/// swallowed via `else |_| {}`. The public resolve() resolves the cache dir from cachePath
+/// and delegates here; tests drive resolveDir directly with a seeded tmpDir.
+///
+/// Precedence (PRD §6):
+///   default => defaultColors()                      (ignores cache + tty)
+///   cached  => loadCache -> live(if tty) -> default
+///   live    => queryColors(if tty) -> loadCache -> default
+fn resolveDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Allocator, mode: Mode, has_tty: bool) Colors {
+    return switch (mode) {
+        .default => defaultColors(),
+        .cached => blk: {
+            if (loadCacheDir(dir, filename, allocator)) |c| break :blk c else |_| {}
+            break :blk liveOr(allocator, has_tty, defaultColors());
+        },
+        .live => blk: {
+            if (has_tty) {
+                if (queryColors(allocator)) |c| break :blk c else |_| {}
+            }
+            if (loadCacheDir(dir, filename, allocator)) |c| break :blk c else |_| {}
+            break :blk defaultColors();
+        },
+    };
+}
+
+/// Cacheless precedence: used when cachePath/openDirAbsolute fails (no $HOME, cache dir
+/// missing). cached and live collapse identically (live(if tty) -> default) without a
+/// cache to fall through to. Returns Colors (no '!').
+fn resolveNoCache(allocator: std.mem.Allocator, mode: Mode, has_tty: bool) Colors {
+    return switch (mode) {
+        .default => defaultColors(),
+        .cached, .live => liveOr(allocator, has_tty, defaultColors()),
+    };
+}
+
+/// Resolve the palette to render with (PRD §6 precedence). INFALLIBLE: returns Colors
+/// (never !Colors), swallowing every cachePath/loadCache/queryColors error and bottoming
+/// out at defaultColors(). `has_tty` is a parameter (not probed internally) so callers pass
+/// palette.hasControllingTty() and tests can inject it. The allocator is only for the
+/// transient cachePath string and any loadCache/queryColors scratch; resolve frees the path
+/// string itself (defer allocator.free(path)).
+pub fn resolve(allocator: std.mem.Allocator, mode: Mode, has_tty: bool) Colors {
+    const path = cachePath(allocator) catch return resolveNoCache(allocator, mode, has_tty);
+    defer allocator.free(path);
+    const dir_path = std.fs.path.dirname(path) orelse return resolveNoCache(allocator, mode, has_tty); // GOTCHA 7: nullable.
+    var dir = std.fs.openDirAbsolute(dir_path, .{}) catch return resolveNoCache(allocator, mode, has_tty);
+    defer dir.close();
+    return resolveDir(dir, std.fs.path.basename(path), allocator, mode, has_tty);
+}
+
 // ---- Cache I/O unit tests (pure + std.testing.tmpDir; never touches real $XDG_CACHE_HOME) ----
 
 test "serialize: full format (header + fg + bg + 0..255)" {
@@ -558,4 +666,117 @@ test "cacheBase/cachePath: path is <base>/tmux-2html/palette against a literal b
     try std.testing.expectEqualStrings(expected, got);
     // And the suffix is always present regardless of base.
     try std.testing.expect(std.mem.endsWith(u8, got, "/tmux-2html/palette"));
+}
+
+// ---- Resolve precedence unit tests (pure + std.testing.tmpDir; NO real tty, NO env mutation) ----
+// resolveDir is driven directly with a seeded tmpDir (GOTCHA 5: no setenv in std). The
+// has_tty=true branch calls queryColors (opens a REAL /dev/tty) and is NOT asserted on in
+// CI — we assert the has_tty=false paths + the default path (GOTCHA 6), exactly like S1
+// leaves queryColors compile-only in tests.
+
+/// A Colors that differs from defaultColors() in background + palette[0]. Used to prove a
+/// cache hit returns the EXACT cached value (not a default coincidental match).
+fn someNonDefaultColors() Colors {
+    var c = defaultColors();
+    c.background = .{ .r = 1, .g = 2, .b = 3 };
+    c.palette[0] = .{ .r = 9, .g = 9, .b = 9 };
+    return c;
+}
+
+/// Field-wise Colors equality (expectEqual on [256]RGB arrays works — S1's tests already do
+/// expectEqual on color.default / c.palette).
+fn expectEqualColors(a: Colors, b: Colors) !void {
+    try std.testing.expectEqual(a.palette, b.palette);
+    try std.testing.expectEqual(a.foreground, b.foreground);
+    try std.testing.expectEqual(a.background, b.background);
+    try std.testing.expectEqual(a.palette_received_count, b.palette_received_count);
+}
+
+test "Mode.fromStr: round-trips the three modes; unknown/empty -> null" {
+    try std.testing.expectEqual(Mode.default, Mode.fromStr("default").?);
+    try std.testing.expectEqual(Mode.cached, Mode.fromStr("cached").?);
+    try std.testing.expectEqual(Mode.live, Mode.fromStr("live").?);
+    try std.testing.expectEqual(@as(?Mode, null), Mode.fromStr("neon"));
+    try std.testing.expectEqual(@as(?Mode, null), Mode.fromStr(""));
+    // case-sensitive (not in the valid set).
+    try std.testing.expectEqual(@as(?Mode, null), Mode.fromStr("DEFAULT"));
+}
+
+test "hasControllingTtyAt: /dev/null openable -> true; bogus absolute path -> false" {
+    try std.testing.expect(hasControllingTtyAt("/dev/null") == true);
+    try std.testing.expect(hasControllingTtyAt("/dev/tmux-2html-no-such-probe-xyz") == false);
+}
+
+test "hasControllingTty: returns a bool, equals the /dev/tty probe (no panic)" {
+    const b = hasControllingTty();
+    try std.testing.expect(b == true or b == false); // env-dependent value; just prove no panic.
+    try std.testing.expect(b == hasControllingTtyAt("/dev/tty")); // same probe underneath.
+}
+
+test "resolve(.default, ...) == defaultColors() regardless of has_tty" {
+    const alloc = std.testing.allocator;
+    // resolve(.default) never touches cache/tty — deterministic in any environment.
+    try expectEqualColors(defaultColors(), resolve(alloc, .default, false));
+    try expectEqualColors(defaultColors(), resolve(alloc, .default, true));
+}
+
+test "resolveDir(.cached, has_tty=false): cache HIT returns the cached Colors" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const orig = someNonDefaultColors();
+    try writeCacheDir(tmp.dir, "palette", alloc, orig); // S2 helper seeds the tmpDir.
+    const got = resolveDir(tmp.dir, "palette", alloc, .cached, false);
+    try expectEqualColors(orig, got); // cache hit -> exact cache.
+}
+
+test "resolveDir(.cached, has_tty=false): cache MISS -> defaultColors (live skipped)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // NO writeCacheDir -> loadCacheDir errors -> live skipped (has_tty=false) -> default.
+    const got = resolveDir(tmp.dir, "palette", alloc, .cached, false);
+    try expectEqualColors(defaultColors(), got);
+}
+
+test "resolveDir(.live, has_tty=false): live skipped; cache HIT returns cache" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const orig = someNonDefaultColors();
+    try writeCacheDir(tmp.dir, "palette", alloc, orig);
+    // has_tty=false => queryColors NOT attempted; cache present => cache hit.
+    // Proves the live->cached->default ordering when live is unavailable.
+    try expectEqualColors(orig, resolveDir(tmp.dir, "palette", alloc, .live, false));
+}
+
+test "resolveDir(.live, has_tty=false): live skipped; cache MISS -> defaultColors" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // NO cache -> loadCacheDir errors; has_tty=false => queryColors skipped -> default.
+    try expectEqualColors(defaultColors(), resolveDir(tmp.dir, "palette", alloc, .live, false));
+}
+
+test "resolveDir(.default, ...) == defaultColors() always (ignores cache + tty)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeCacheDir(tmp.dir, "palette", alloc, someNonDefaultColors());
+    // A present cache is STILL ignored under .default.
+    try expectEqualColors(defaultColors(), resolveDir(tmp.dir, "palette", alloc, .default, false));
+}
+
+test "resolve never panics for any mode x has_tty (infallible smoke)" {
+    // Every path bottoms at defaultColors(), whose fg/bg are non-null. has_tty=true calls
+    // queryColors, which opens a real /dev/tty — in CI that errors and is swallowed, so the
+    // result is still a valid Colors. We only assert non-null fg/bg (no env-dependent values).
+    const alloc = std.testing.allocator;
+    const modes = [_]Mode{ .default, .cached, .live };
+    for (modes) |m| {
+        try expectEqualColors(resolve(alloc, m, false), resolve(alloc, m, false)); // determinism on has_tty=false.
+        const c = resolve(alloc, m, true); // no panic; live error swallowed.
+        try std.testing.expect(c.foreground != null);
+        try std.testing.expect(c.background != null);
+    }
 }
