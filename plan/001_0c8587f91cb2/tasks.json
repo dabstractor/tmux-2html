@@ -494,7 +494,7 @@
                   "type": "Subtask",
                   "id": "P2.M2.T2.S1",
                   "title": "O (full) + visible bindings (run-shell pane)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T1.S1",

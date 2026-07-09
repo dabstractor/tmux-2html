@@ -121,15 +121,43 @@ if [ -n "${TMUX_2HTML_DEBUG:-}" ]; then
 fi
 
 # ----------------------------------------------------------------------
-# ## Bindings (prefix table) — P2.M2.T2.S1 (O + visible) / P2.M2.T2.S2 (C-o region)
+# ## Bindings (prefix table) — P2.M2.T2.S1 (O + visible)
 # ----------------------------------------------------------------------
-# Consumes: $TMUX_2HTML_BIN, $full_key, $region_key, $visible_key, $binary_ready
-# Pattern: interpolate the resolved values DIRECTLY into bind-key command strings, e.g.
-#   [ "$binary_ready" = 1 ] && tmux bind-key "$full_key" run-shell \
-#       "$TMUX_2HTML_BIN/tmux-2html pane --full --target '#{pane_id}'"
-# The binary reads output-dir/history-limit/open/font itself via show-option — do NOT pass them.
-# (exported shell vars do NOT reach run-shell children spawned by bind-key.)
-# TODO(P2.M2.T2.S1/S2): implement prefix-table bindings here.
+# PRD §9.3: prefix O renders the FULL pane; the visible key (if set) renders
+# visible-only. Both are run-shell wrappers around `pane`, which resolves
+# output-dir/history/font/open itself via show-option (do NOT pass them).
+# run-shell expands #{pane_id} at fire time and has no /dev/tty, so pane uses
+# the CACHED palette. We capture pane's stdout (`wrote <path>`) and flash it on
+# the status line via display-message. Gated on binary_ready (§9.1: skip
+# binding when the install failed). No set -e — a bad key just prints tmux's
+# error and sourcing continues.
+
+# O (full) — prefix O renders the whole pane (scrollback + visible).
+# Quoting: $TMUX_2HTML_BIN expanded NOW; #{pane_id} stored literally (run-shell
+# expands it); \$(…)/\"/\$out escaped so run-shell's /bin/sh runs them at fire time.
+[ "$binary_ready" = 1 ] && tmux bind-key "$full_key" run-shell \
+    "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --full --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
+
+# Visible (only if @tmux-2html-visible-key is set; empty default ⇒ unbound,
+# PRD §9.2/§9.3).
+if [ -n "$visible_key" ]; then
+    [ "$binary_ready" = 1 ] && tmux bind-key "$visible_key" run-shell \
+        "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --visible --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
+fi
+
+# Optional test seam (APPEND with >>; §4 already wrote with > and runs first
+# in file order). Records the binding decisions for deterministic tests.
+if [ -n "${TMUX_2HTML_DEBUG:-}" ]; then
+    {
+        printf 'full_bound=%s\n'    "$([ "$binary_ready" = 1 ] && echo 1 || echo 0)"
+        printf 'visible_bound=%s\n' "$([ "$binary_ready" = 1 ] && [ -n "$visible_key" ] && echo 1 || echo 0)"
+    } >> "$TMUX_2HTML_DEBUG"
+fi
+
+# ------------------------------------------------------------------
+# C-o region binding — P2.M2.T2.S2 (display-popup wrapper + .last-output sidecar)
+# Consumes: $region_key, $TMUX_2HTML_BIN, $binary_ready. NOT implemented here.
+# ------------------------------------------------------------------
 # ----------------------------------------------------------------------
 
 # ----------------------------------------------------------------------
