@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Core Rendering Engine",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Establish the Zig project, vendor the term2html/ghostty render engine, and deliver two standalone subcommands that work WITHOUT tmux: `tmux-2html render` (ANSI stdin → color-faithful HTML) and `tmux-2html sync-palette` (OSC query → XDG cache). This phase validates every PRD §2 technical finding and the central renderer pipeline (PRD §8) in isolation. Output: a binary you can pipe colored output into and get correct HTML, plus a cached palette.",
       "milestones": [
         {
@@ -282,7 +282,7 @@
           "type": "Milestone",
           "id": "P1.M4",
           "title": "Selection Rendering & Golden Tests",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Expose the formatter's native selection on `render --selection` (PRD §5.1) — the linchpin used by both scripting/tests and the region TUI — and seed the golden test harness that pins HTML output.",
           "tasks": [
             {
@@ -314,14 +314,14 @@
               "type": "Task",
               "id": "P1.M4.T2",
               "title": "Golden & unit test harness",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Seed testdata fixtures and the golden `*.ansi → *.html` tests (PRD §15), plus unit tests for palette and selection math.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M4.T2.S1",
                   "title": "Golden harness + testdata (color/attr/OSC8 cases)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1",
@@ -337,7 +337,7 @@
                   "type": "Subtask",
                   "id": "P1.M4.T2.S2",
                   "title": "Palette parse/serialize + selection sub-rectangle golden tests",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S2",

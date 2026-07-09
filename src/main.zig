@@ -257,6 +257,9 @@ test {
     _ = @import("palette.zig");
     // P1.M3.T1.S1: keep render.zig tests reachable (renderGrid unit tests).
     _ = @import("render.zig");
+    // P1.M4.T2.S1: golden harness (color/attr/OSC8 testdata) — embeds testdata/* via the
+    // "testdata" module wired in build.zig.
+    _ = @import("golden_test.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {

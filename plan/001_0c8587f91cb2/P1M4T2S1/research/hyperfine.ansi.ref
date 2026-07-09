@@ -1,0 +1,11 @@
+[1mBenchmark [0m[1m1[0m: ./dfa-wc enwiki-20260301-all-titles
+  Time ([1;32mmean[0m ± [32mσ[0m):     [1;32m348.2 ms[0m ± [32m 71.5 ms[0m    [User: [34m313.6 ms[0m, System: [34m32.2 ms[0m]
+  Range ([36mmin[0m … [35mmax[0m):   [36m305.5 ms[0m … [35m495.0 ms[0m    [2m10 runs[0m
+ 
+[1mBenchmark [0m[1m2[0m: wc enwiki-20260301-all-titles
+  Time ([1;32mmean[0m ± [32mσ[0m):     [1;32m485.5 ms[0m ± [32m 26.8 ms[0m    [User: [34m459.3 ms[0m, System: [34m24.4 ms[0m]
+  Range ([36mmin[0m … [35mmax[0m):   [36m464.1 ms[0m … [35m534.7 ms[0m    [2m10 runs[0m
+ 
+[1mSummary[0m
+  [36m./dfa-wc enwiki-20260301-all-titles[0m ran
+[1;32m    1.39[0m ± [32m0.30[0m times faster than [35mwc enwiki-20260301-all-titles[0m

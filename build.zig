@@ -39,6 +39,12 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addImport("ghostty-vt", dep.module("ghostty-vt"));
     }
 
+    // P1.M4.T2.S1: embed the golden fixtures as a module so tests can @embedFile testdata/*.
+    // @embedFile is confined to a module's package root; testdata/embed.zig roots testdata/,
+    // so its sibling .ansi/.html resolve. Unreferenced on the prod path => not compiled in.
+    const testdata_mod = b.createModule(.{ .root_source_file = b.path("testdata/embed.zig") });
+    exe.root_module.addImport("testdata", testdata_mod);
+
     b.installArtifact(exe);
 
     // `zig build run`  (remember: --release=fast on the CLI; see Gotcha 1)
