@@ -377,7 +377,7 @@ pub fn cachePath(allocator: std.mem.Allocator) ![]u8 {
 /// Atomic write of `colors` to `dir/filename`. Writes `dir/.palette.tmp` (SAME dir as the
 /// target => same filesystem => rename is atomic), best-effort fsync, then renames over the
 /// target. Cleans up the temp file on any error.
-fn writeCacheDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Allocator, colors: Colors) !void {
+pub fn writeCacheDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Allocator, colors: Colors) !void {
     const text = try serialize(allocator, colors);
     defer allocator.free(text);
     const tmp = ".palette.tmp"; // same dir as target => same filesystem (GOTCHA 5).
@@ -396,7 +396,7 @@ fn writeCacheDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Alloc
 }
 
 /// Read + parse `dir/filename`. read-only open; reads the whole file (<= 1 MiB) then parses.
-fn loadCacheDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Allocator) !Colors {
+pub fn loadCacheDir(dir: std.fs.Dir, filename: []const u8, allocator: std.mem.Allocator) !Colors {
     var f = try dir.openFile(filename, .{}); // read-only default (GOTCHA 6).
     defer f.close();
     const text = try f.readToEndAlloc(allocator, 1 << 20); // caller frees (GOTCHA 7).
@@ -426,6 +426,21 @@ pub fn loadCache(allocator: std.mem.Allocator) !Colors {
     var dir = try std.fs.openDirAbsolute(dir_path, .{});
     defer dir.close();
     return loadCacheDir(dir, std.fs.path.basename(path), allocator);
+}
+
+/// Read + parse a palette file at an arbitrary path (`--from file PATH` source). Relative
+/// paths resolve against the cwd; absolute paths use openFileAbsolute. Same plain-text
+/// format as the cache (fg/bg/`N R G B` lines). Propagates open errors (FileNotFound) and
+/// MalformedLine. Seeds from defaultColors(), so a partial file still yields a usable palette.
+pub fn loadColorsFile(allocator: std.mem.Allocator, path: []const u8) !Colors {
+    var f = if (std.fs.path.isAbsolute(path))
+        try std.fs.openFileAbsolute(path, .{})
+    else
+        try std.fs.cwd().openFile(path, .{});
+    defer f.close();
+    const text = try f.readToEndAlloc(allocator, 1 << 20);
+    defer allocator.free(text);
+    return parse(text);
 }
 
 // ---- Resolve precedence (PRD §6) -------------------------------------------
@@ -666,6 +681,40 @@ test "cacheBase/cachePath: path is <base>/tmux-2html/palette against a literal b
     try std.testing.expectEqualStrings(expected, got);
     // And the suffix is always present regardless of base.
     try std.testing.expect(std.mem.endsWith(u8, got, "/tmux-2html/palette"));
+}
+
+test "loadColorsFile: absolute path round-trip (tmpDir + realpathAlloc)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Write a known palette file, then resolve its ABSOLUTE path (loadColorsFile branches
+    // on isAbsolute; an absolute path avoids cwd dependence in CI).
+    try tmp.dir.writeFile(.{ .sub_path = "src.txt", .data = "fg 1 2 3\nbg 4 5 6\n0 10 20 30\n5 40 50 60\n" });
+    const abs = try tmp.dir.realpathAlloc(alloc, "src.txt");
+    defer alloc.free(abs);
+
+    const got = try loadColorsFile(alloc, abs);
+    try std.testing.expectEqual(color.RGB{ .r = 1, .g = 2, .b = 3 }, got.foreground.?);
+    try std.testing.expectEqual(color.RGB{ .r = 4, .g = 5, .b = 6 }, got.background.?);
+    try std.testing.expectEqual(color.RGB{ .r = 10, .g = 20, .b = 30 }, got.palette[0]);
+    try std.testing.expectEqual(color.RGB{ .r = 40, .g = 50, .b = 60 }, got.palette[5]);
+    try std.testing.expectEqual(@as(u16, 2), got.palette_received_count);
+}
+
+test "loadColorsFile: missing file errors" {
+    const alloc = std.testing.allocator;
+    try std.testing.expectError(error.FileNotFound, loadColorsFile(alloc, "/tmp/tmux-2html-no-such-palette-xyz"));
+}
+
+test "loadColorsFile: malformed line errors (MalformedLine propagates)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(.{ .sub_path = "src.txt", .data = "0 notanumber 0 0\n" });
+    const abs = try tmp.dir.realpathAlloc(alloc, "src.txt");
+    defer alloc.free(abs);
+    try std.testing.expectError(error.MalformedLine, loadColorsFile(alloc, abs));
 }
 
 // ---- Resolve precedence unit tests (pure + std.testing.tmpDir; NO real tty, NO env mutation) ----

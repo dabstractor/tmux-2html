@@ -49,6 +49,64 @@ or hand-edit the file.
   `tmux display-popup` (a real pty, so OSC works) and then skips re-syncing while
   the cache is present.
 
+### sync-palette
+
+`tmux-2html sync-palette` captures a terminal palette and writes the cache. It is
+the command you run once so that later `render` / `pane` runs produce HTML that uses
+your real terminal colors, even from a tty-less `run-shell` context.
+
+```
+Usage: tmux-2html sync-palette [options]
+
+Options:
+  --from source       tty (default) | file PATH
+  --force             re-query even if a cache exists
+  --help              show this help
+
+Exit codes: 0 success, 1 usage/runtime error, 2 capture/target error.
+```
+
+- **`--from tty`** (the default) queries `/dev/tty` using OSC 4 (256-color palette)
+  and OSC 10 / 11 (foreground / background), then writes the cache. This needs a
+  controlling terminal: it works interactively and inside a `tmux display-popup`
+  (a real pty), but fails under `tmux run-shell`, cron, or behind a pipe.
+- **`--from file PATH`** imports a palette from a plain-text file in the same
+  format as the cache (see [Format](#format)). This is how you seed the cache on a
+  headless or CI box: capture a palette on an interactive machine, copy the file
+  over, and run `sync-palette --from file`. Relative paths resolve against the
+  current directory; absolute paths are accepted.
+- **`--force`** re-acquires the palette and overwrites the cache even when one
+  already exists. Without `--force`, an existing cache is left untouched and
+  `sync-palette` prints `palette cache already exists at <path>; use --force to
+  re-query` without touching `/dev/tty`.
+
+**Exit codes:**
+
+- `0` — the cache was written, or a cache already existed and was skipped (no
+  `--force`).
+- `1` — runtime error: an unreadable, missing, or malformed `--from file` path;
+  the cache directory could not be determined or written (`$HOME` unset, permission
+  error).
+- `2` — capture/target error: `--from tty` was used but the terminal could not be
+  queried (no controlling tty, or the terminal did not respond). This is the code
+  to expect under `tmux run-shell` or any tty-less context.
+
+**Partial responses.** Many terminals answer only the first 16 colors and return
+defaults or silence for the 216-cube and grayscale range. `sync-palette` treats a
+partial response as success: it warns (to stderr) that fewer than 256 colors were
+captured, backfills the missing indices from the bundled default palette, writes
+the cache, and exits `0`. A count below 256 is normal, not a failure.
+
+#### Inside tmux vs. outside tmux
+
+Run `tmux-2html sync-palette` from **inside** the tmux session whose captures
+you're generating. It queries the palette exactly as tmux presents it to panes,
+which is the palette your captures are rendered against, so it produces the closest
+color match. If you run it **outside** tmux (directly in your terminal emulator),
+you capture the emulator's own palette instead; the two can differ when tmux
+applies `terminal-overrides`, a custom `default-terminal`, or RGB features. When in
+doubt, run it inside tmux.
+
 ### How it is consumed
 
 Render precedence for `--palette` (default chain `cached → live → default`):
