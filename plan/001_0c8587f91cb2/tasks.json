@@ -359,7 +359,7 @@
       "type": "Phase",
       "id": "P2",
       "title": "tmux Capture & Plugin",
-      "status": "Researching",
+      "status": "Ready",
       "description": "Make the binary tmux-aware: capture panes (PRD §5.2), then ship the full TPM plugin (entrypoint, options, bindings) and the build-or-download binary acquisition (PRD §9, §10). After this phase a user installs via TPM and `prefix O` renders the pane. Depends on P1 (renderer + palette cache).",
       "milestones": [
         {
@@ -530,14 +530,14 @@
           "type": "Milestone",
           "id": "P2.M3",
           "title": "Binary Acquisition (ensure_binary.sh + download.sh)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "The flipped-hybrid installer (PRD §10): build-from-source if Zig present, else download a verified prebuilt; never leave a half-written binary.",
           "tasks": [
             {
               "type": "Task",
               "id": "P2.M3.T1",
               "title": "ensure_binary.sh + download.sh",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Order: version-check → build → download-fallback; atomic install; loud failure.",
               "subtasks": [
                 {
@@ -558,7 +558,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S2",
                   "title": "download.sh: platform triple → fetch → SHA256 verify → atomic extract",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P2.M3.T1.S1"
@@ -600,7 +600,7 @@
                   "type": "Subtask",
                   "id": "P3.M1.T1.S1",
                   "title": "Alt-screen + raw termios + panic-safe restore + event loop",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1"
