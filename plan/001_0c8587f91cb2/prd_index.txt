@@ -1,36 +1,37 @@
 h1.0 tmux-2html — Product Requirements & Technical Specification
- h2.0 1. Overview
+ h2.0 0. ⚠️ CRITICAL SAFETY RULE — READ BEFORE IMPLEMENTING OR TESTING
+ h2.1 1. Overview
   h3.0 1.1 Goals
   h3.1 1.2 Non-goals (v1)
- h2.1 2. Background & key technical findings
- h2.2 3. Architecture
- h2.3 4. Repository layout
- h2.4 5. The binary — CLI surface
+ h2.2 2. Background & key technical findings
+ h2.3 3. Architecture
+ h2.4 4. Repository layout
+ h2.5 5. The binary — CLI surface
   h3.2 5.1 tmux-2html render — core renderer (stdin → HTML)
   h3.3 5.2 tmux-2html pane — capture a pane → HTML
   h3.4 5.3 tmux-2html region — interactive copy-mode overlay → HTML
   h3.5 5.4 tmux-2html sync-palette — query + cache the palette
   h3.6 5.5 tmux-2html --version / --help
- h2.5 6. Palette subsystem
- h2.6 7. The copy-mode TUI (tmux-2html region)
+ h2.6 6. Palette subsystem
+ h2.7 7. The copy-mode TUI (tmux-2html region)
   h3.7 7.1 Display
   h3.8 7.2 Movement (vim + arrows)
   h3.9 7.3 Search
   h3.10 7.4 Selection — both modes via v
   h3.11 7.5 Confirm / cancel
   h3.12 7.6 Mouse (supported)
- h2.7 8. Rendering engine (render.zig)
- h2.8 9. tmux plugin
+ h2.8 8. Rendering engine (render.zig)
+ h2.9 9. tmux plugin
   h3.13 9.1 Entrypoint tmux-2html.tmux
   h3.14 9.2 Options (tmux user options, @tmux-2html-*)
   h3.15 9.3 Bindings (prefix table)
- h2.9 10. Binary acquisition (scripts/ensure_binary.sh)
- h2.10 11. Build & release
- h2.11 12. Dependencies & pinned versions
- h2.12 13. Edge cases & limits
- h2.13 14. Licensing & attribution
- h2.14 15. Testing strategy
- h2.15 16. Roadmap (out of v1 scope)
- h2.16 17. Decisions log
+ h2.10 10. Binary acquisition (scripts/ensure_binary.sh)
+ h2.11 11. Build & release
+ h2.12 12. Dependencies & pinned versions
+ h2.13 13. Edge cases & limits
+ h2.14 14. Licensing & attribution
+ h2.15 15. Testing strategy
+ h2.16 16. Roadmap (out of v1 scope)
+ h2.17 17. Decisions log
 ---
-code:7 para:25 list:21 table:1 quote:2
+code:8 para:30 list:22 table:1 quote:2

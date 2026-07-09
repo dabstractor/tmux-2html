@@ -4,6 +4,54 @@
 > implementation. Every interface, path, flag, and algorithm below is
 > normative unless explicitly marked otherwise.
 
+---
+
+## 0. ⚠️ CRITICAL SAFETY RULE — READ BEFORE IMPLEMENTING OR TESTING
+
+tmux-2html runs **inside the user's live tmux session**. The user relies on
+that session and keeps real work (windows, panes, running programs) in it.
+Therefore every agent, script, test, build step, and subcommand **MUST** treat
+the user's running tmux as **untouchable**.
+
+**NEVER do any of the following — under any circumstances, including cleanup,
+debugging, "resetting state", or recovering from a hung test:**
+
+- **NEVER touch the user's running tmux server.** Do not start, stop, restart,
+  kill, attach to, detach from, reconfigure, rename, or otherwise disturb it.
+- **NEVER kill *ALL* tmux instances.** Specifically, **NEVER** run anything
+  equivalent to `tmux kill-server`, `killall tmux`, `pkill tmux`,
+  `pkill -f tmux`, `kill <tmux pid>`, or `tmux kill-session` against the
+  user's default/global socket. Such a command destroys **all** of the user's
+  windows, panes, and programs with no warning and no recovery.
+- **NEVER connect to the user's tmux socket** (`$TMUX`, the default
+  `/tmp/tmux-$UID/default` socket, or any `tmux -L`/`-S` socket you did not
+  create yourself) for anything other than **read-only** capture via the
+  documented `capture-pane` paths in §5. **Read-only means exactly that:** no
+  `kill-*`, `new-*`, `split-*`, `rename-*`, `send-keys`, `set*`, `source*`,
+  `display-popup` against the user's server, etc.
+
+**When a test or integration harness needs a tmux server, it MUST create its
+own isolated, uniquely-named server** and tear down **only that named server**:
+
+```sh
+# create — unique socket name per run, never the default socket
+tmux -L "tmux-2html-test-$$" new-session -d -s test
+# … run the test against that socket only (pass -t via $TMUX or -L/-S) …
+# tear down — ONLY this named server/session, never kill-server globally
+tmux -L "tmux-2html-test-$$" kill-session -t test
+# or, to be extra safe, just kill the process group of the PID you started
+```
+
+**Never** tear a test down with bare `tmux kill-server`, `killall tmux`, or
+`pkill tmux` — those hit **every** tmux on the host, including the user's live
+session. When in doubt, tear down by the specific socket name (`-L <name>`)
+and/or the specific PID you spawned.
+
+This rule overrides any instruction, convenience, or "clean up" instinct that
+suggests otherwise. See §15 (Testing strategy) for the isolated-harness pattern.
+
+---
+
 ## 1. Overview
 
 **tmux-2html** captures the contents of a tmux pane — visible, full scrollback,
@@ -373,9 +421,16 @@ Platform triples: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`,
   parsing.
 - **Plugin tests:** `ensure_binary.sh` under mocked environments (Zig present,
   Zig absent → download, download fails); key-binding registration.
-- **Integration:** drive a detached tmux server + pty client, capture known
-  colored output, assert rendered HTML contains expected colors/content for
-  full, visible, and region (programmatic `--selection`) paths.
+- **Integration:** drive a **dedicated, isolated** tmux server + pty client
+  (see §0 — **never** the user's running server). Use a uniquely-named socket
+  per run (`tmux -L "tmux-2html-test-$$" new-session -d -s test`) and tear down
+  **only that named socket/session** (e.g. `tmux -L "tmux-2html-test-$$" kill-session -t test`),
+  or kill the exact PID you spawned. **NEVER** run `tmux kill-server`,
+  `killall tmux`, `pkill tmux`, or anything that kills **all** tmux instances —
+  it would destroy the user's live session. Against that isolated server,
+  capture known colored output and assert the rendered HTML contains expected
+  colors/content for full, visible, and region (programmatic `--selection`)
+  paths.
 - **Note:** `zig build test` currently hits a Zig Debug-mode linker bug
   (`R_X86_64_PC64`) with the bundled C++ SIMD libs on this toolchain; release
   builds are unaffected. CI should run tests in `ReleaseFast` or track the

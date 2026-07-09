@@ -366,14 +366,14 @@
           "type": "Milestone",
           "id": "P2.M1",
           "title": "Capture Subsystem + pane Subcommand",
-          "status": "Planned",
+          "status": "Implementing",
           "description": "Implement `src/capture.zig` (run tmux capture-pane via $TMUX, read pane geometry) and wire the `pane` subcommand (PRD §5.2) to renderGrid.",
           "tasks": [
             {
               "type": "Task",
               "id": "P2.M1.T1",
               "title": "capture.zig: geometry + capture-pane invocation",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Resolve pane size from tmux formats and shell out to capture-pane (PRD §2.1, §5.2).",
               "subtasks": [
                 {
@@ -395,7 +395,7 @@
                   "type": "Subtask",
                   "id": "P2.M1.T1.S2",
                   "title": "parse capture output → Captured; visible vs full; history cap + truncation notice",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S1"
