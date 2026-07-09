@@ -660,6 +660,45 @@ test "writeCacheDir + loadCacheDir disk round-trip (std.testing.tmpDir)" {
     try std.testing.expect(std.mem.indexOf(u8, text, bg_line) != null);
 }
 
+// Rigorous round-trip: a Colors with ARBITRARY mutated values (not just the bundled defaults)
+// must survive serialize -> write -> read -> parse field-for-field. Strengthens the existing
+// default-only "writeCacheDir + loadCacheDir disk round-trip" test (P1.M2.T1.S2). The PUBLIC
+// writeCache/loadCache are XDG-path wrappers (cachePath -> getenv) that can't be unit-tested
+// without env mutation (no setenv in std — palette.zig GOTCHA 5); they delegate to this dir-
+// scoped core, so this IS the canonical round-trip. palette.zig tests never touch Terminal.init
+// => not subject to the cross-test GOTCHA.
+test "writeCacheDir -> loadCacheDir round-trip preserves a NON-DEFAULT Colors" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // A Colors deliberately unlike defaultColors() so a serialization bug (dropped fg/bg,
+    // ignored high indices, off-by-one) can't pass by coincidental default equality.
+    var orig = defaultColors();
+    orig.foreground = .{ .r = 200, .g = 100, .b = 50 };
+    orig.background = .{ .r = 1, .g = 2, .b = 3 };
+    orig.palette[0] = .{ .r = 9, .g = 9, .b = 9 };
+    orig.palette[100] = .{ .r = 250, .g = 240, .b = 230 };
+    orig.palette[255] = .{ .r = 11, .g = 22, .b = 33 };
+    orig.palette_received_count = 256; // serialize writes all 256 index lines regardless
+
+    try writeCacheDir(tmp.dir, "palette", alloc, orig);
+    const got = try loadCacheDir(tmp.dir, "palette", alloc);
+
+    // Full field-equal round-trip.
+    try std.testing.expectEqualSlices(color.RGB, &orig.palette, &got.palette);
+    try std.testing.expectEqual(orig.foreground, got.foreground);
+    try std.testing.expectEqual(orig.background, got.background);
+    try std.testing.expectEqual(@as(u16, 256), got.palette_received_count);
+
+    // Spot-check the mutated entries survived (not coincidentally equal to defaults).
+    try std.testing.expectEqual(color.RGB{ .r = 9, .g = 9, .b = 9 }, got.palette[0]);
+    try std.testing.expectEqual(color.RGB{ .r = 250, .g = 240, .b = 230 }, got.palette[100]);
+    try std.testing.expectEqual(color.RGB{ .r = 11, .g = 22, .b = 33 }, got.palette[255]);
+    try std.testing.expectEqual(color.RGB{ .r = 200, .g = 100, .b = 50 }, got.foreground.?);
+    try std.testing.expectEqual(color.RGB{ .r = 1, .g = 2, .b = 3 }, got.background.?);
+}
+
 test "cacheBase/cachePath: path is <base>/tmux-2html/palette against a literal base" {
     // We don't mutate process env (unsafe). Instead assert the path-building format against
     // the resolved base the way cachePath itself does: allocPrint "{s}/tmux-2html/palette".
