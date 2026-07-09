@@ -366,7 +366,7 @@
           "type": "Milestone",
           "id": "P2.M1",
           "title": "Capture Subsystem + pane Subcommand",
-          "status": "Implementing",
+          "status": "Complete",
           "description": "Implement `src/capture.zig` (run tmux capture-pane via $TMUX, read pane geometry) and wire the `pane` subcommand (PRD §5.2) to renderGrid.",
           "tasks": [
             {
@@ -412,14 +412,14 @@
               "type": "Task",
               "id": "P2.M1.T2",
               "title": "pane subcommand wiring",
-              "status": "Implementing",
+              "status": "Complete",
               "description": "Connect PRD §5.2 flags to capture + renderGrid, with output naming and open.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M1.T2.S1",
                   "title": "pane subcommand: capture → renderGrid + filename collision avoidance + open",
-                  "status": "Implementing",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S2",
