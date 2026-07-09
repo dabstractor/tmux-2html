@@ -1,5 +1,62 @@
 # Configuration
 
+tmux-2html is configured entirely through tmux user options, named
+`@tmux-2html-*`. Set them in `~/.tmux.conf` with
+`set -g @tmux-2html-<name> "value"` **before** the TPM run line:
+
+```tmux
+# ~/.tmux.conf
+set -g @tmux-2html-font "Fira Code"
+set -g @tmux-2html-region-key "C-S-o"
+
+# ... then ...
+run '~/.tmux/plugins/tpm/tpm'
+```
+
+Options are read when the plugin loads (TPM sources `tmux-2html.tmux`), so
+changing an option and reloading tmux (`prefix r` / `tmux source-file ~/.tmux.conf`)
+applies it. An unset option falls back to its default — you only need to set the
+ones you want to change.
+
+## Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `@tmux-2html-full-key` | `O` | Prefix key: capture the full pane (scrollback + visible). |
+| `@tmux-2html-region-key` | `C-o` | Prefix key: open the full-screen region overlay (TUI). |
+| `@tmux-2html-visible-key` | *(empty)* | Prefix key: capture the visible pane only. Unbound by default. |
+| `@tmux-2html-output-dir` | `${XDG_DATA_HOME:-~/.local/share}/tmux-2html` | Directory where rendered HTML files are written. |
+| `@tmux-2html-open` | `on` | If `on`, run `xdg-open` on the HTML file after writing it. |
+| `@tmux-2html-font` | `monospace` | CSS `font-family` used in the rendered HTML. |
+| `@tmux-2html-history-limit` | `50000` | Maximum number of scrollback lines captured per pane. |
+| `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory containing the `tmux-2html` binary. |
+
+> **`C-o` key-conflict note.** `C-o` is already used in the stock tmux prefix
+> table (bound to `rotate-window`; in some configs to a debug `display-message`).
+> Setting `@tmux-2html-region-key C-o` (the default) **overrides** that binding.
+> To preserve the existing `C-o` binding, choose a different key, for example:
+>
+> ```tmux
+> set -g @tmux-2html-region-key "C-S-o"
+> ```
+>
+> Likewise, `@tmux-2html-visible-key` is empty by default, so visible-only
+> capture is unbound until you explicitly set it, e.g.
+> `set -g @tmux-2html-visible-key "v"`.
+
+## How options are read
+
+The loader reads each option with `tmux show-option -gqv @tmux-2html-<name>`. An
+unset option prints nothing and falls back to the default above; a set option is
+used verbatim (spaces preserved, so fonts like `"Fira Code"` work).
+
+The pane and region commands re-read `@tmux-2html-output-dir`,
+`@tmux-2html-history-limit`, `@tmux-2html-open`, and `@tmux-2html-font`
+themselves at runtime via `tmux show-option`, so you do not pass them on the
+command line — setting the option in `~/.tmux.conf` is enough. The loader
+exports the resolved values only to drive key-resolution and the sibling binding
+and auto-sync tasks; they are not propagated to `run-shell` children.
+
 ## Palette
 
 tmux-2html renders using the terminal palette you actually have, even when there is

@@ -447,14 +447,14 @@
               "type": "Task",
               "id": "P2.M2.T1",
               "title": "tmux-2html.tmux entrypoint + options",
-              "status": "Planned",
+              "status": "Researching",
               "description": "The TPM-sourced entrypoint: resolve BIN, ensure binary, read options, one-time palette sync.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T1.S1",
                   "title": "Entrypoint: resolve BIN, ensure binary, read @tmux-2html-* options",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: findings_and_corrections.md §3 — TPM sources tmux-2html.tmux at load. Read user options via `tmux show-option -gqv @tmux-2html-<name>`. Resolve `TMUX_2HTML_BIN` (default `$TMUX_PLUGIN_MANAGER_PATH/tmux-2html/bin`). If binary missing/stale → `run-shell scripts/ensure_binary.sh`; on failure → `display-message` error + manual instructions + skip binding (PRD §9.1 step 2, §10 step 4).\n2. INPUT: PRD §9.2 options table (full-key=O, region-key=C-o, visible-key=empty, output-dir, open=on, font, history-limit=50000, binary-dir).\n3. LOGIC: tmux-2html.tmux (POSIX sh): resolve BIN; run ensure_binary.sh if needed; read each option with a default fallback (`tmux show-option -gqv @tmux-2html-font || echo monospace` style); export them for the binding generation. Guard so a missing binary doesn't crash the user's tmux.\n4. OUTPUT: sourcing the plugin under TPM sets up BIN + options without errors; options are overridable by the user.\n5. DOCS: [Mode A] this subtask CREATES `docs/CONFIGURATION.md` documenting the full @tmux-2html-* options table (defaults + meanings + the C-o override note PRD §9.2). This is the primary config doc surface (§5 Mode A).",
@@ -469,7 +469,7 @@
                   "type": "Subtask",
                   "id": "P2.M2.T1.S2",
                   "title": "One-time palette auto-sync popup trigger",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1",
