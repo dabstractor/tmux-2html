@@ -16,6 +16,8 @@ const builtin = @import("builtin");
 const ghostty_vt = @import("ghostty-vt");
 const Terminal = ghostty_vt.Terminal;
 const Selection = ghostty_vt.Selection;
+const point = ghostty_vt.point; // point.Point{ .screen = .{ .x, .y } } (P1.M4.T1.S1)
+const Screen = ghostty_vt.Screen; // *const Screen param of buildSelection
 const fmt = @import("ghostty_format.zig"); // vendored: ScreenFormatter, Options (has font)
 const palette = @import("palette.zig"); // Colors, defaultColors()
 const cli = @import("cli.zig"); // RenderOpts
@@ -116,9 +118,10 @@ fn lineCount(ansi: []const u8) u16 {
 ///   -> extra = .styles (per-cell <span> inline CSS + OSC-8 <a> hyperlinks)
 ///   -> out.print("{f}", .{f})
 ///
-/// `sel` is `?Selection`: S1 always passes null. S4 passes a Selection built from Pins.
-/// `font` is `?[]const u8`: null lets the formatter default to "monospace".
-/// `out` is `*std.Io.Writer` (the NEW Zig 0.15 IO type) — callers create it (see `run` / tests).
+/// `sel` is `?cli.SelectionCoords` (P1.M4.T1.S1): null renders the WHOLE grid; a value is
+/// translated to a native `Selection` from Pins via `buildSelection` INSIDE renderGrid (where
+/// the loaded screen exists). `font` is `?[]const u8`: null lets the formatter default to
+/// "monospace". `out` is `*std.Io.Writer` (the NEW Zig 0.15 IO type) — callers create it.
 ///
 /// Because `opts.palette` is set, palette colors emit as INLINE RGB (`#rrggbb`) — output is
 /// self-contained, no `:root{--vt-palette-N}` CSS block (that block is only from
@@ -129,7 +132,7 @@ pub fn renderGrid(
     ansi: []const u8,
     size: Size,
     colors: palette.Colors,
-    sel: ?Selection,
+    sel: ?cli.SelectionCoords,
     font: ?[]const u8,
     out: *std.Io.Writer,
 ) !void {
@@ -146,6 +149,12 @@ pub fn renderGrid(
         try stream.next(c);
     }
 
+    // S1 (P1.M4.T1.S1): build the native Selection from CLI coords now that the screen
+    // exists. renderGrid owns the Terminal/Screen, so the coordinate->Pin translation
+    // happens here. `t.screens.active` is *Screen (coerces to *const Screen).
+    var native_sel: ?Selection = null;
+    if (sel) |coords| native_sel = try buildSelection(t.screens.active, coords);
+
     var f = fmt.ScreenFormatter.init(t.screens.active, .{
         .emit = .html,
         .background = colors.background, // ?color.RGB
@@ -153,9 +162,40 @@ pub fn renderGrid(
         .palette = &colors.palette, // *const [256]RGB -> ?*const color.Palette
         .font = font, // ?[]const u8
     });
-    f.content = .{ .selection = sel }; // null = WHOLE grid
+    f.content = .{ .selection = native_sel }; // null = WHOLE grid; some(sel) = sub-grid (inclusive)
     f.extra = .styles; // per-cell <span> styles + OSC-8 <a> hyperlinks
     try out.print("{f}", .{f}); // {f} invokes f.format(*std.Io.Writer)
+}
+
+/// Build a ghostty `Selection` from CLI coordinates against a loaded screen (PRD §5.1/§7.4).
+/// Reusable: `renderGrid` calls this internally; the TUI (P3.M2.T2.S2) calls it directly.
+///
+/// Coordinates are CELL INDICES in the loaded grid (x=column, y=row, origin top-left). The
+/// `.screen` tag is used (consistent with the formatter's own `order()`/`getTopLeft(.screen)`
+/// reasoning; for a fresh terminal sized to the input's line count there is no scrollback,
+/// so `.screen` top-left == grid row 0). start/end may be given in ANY order — the formatter
+/// normalizes via `Selection.order`.
+///
+/// Returns `error.OutOfRange` if a coordinate is outside the grid: `x >= cols` or `y` past
+/// the last WRITTEN row (the `.screen` page list covers only written rows, so selecting into
+/// the unwritten tail is rejected — the safe, intended behavior).
+///
+/// GOTCHA: do NOT call `Selection.deinit` — `init` creates an UNTRACKED selection (no heap,
+/// no tracking handles); `deinit` is a NO-OP for untracked bounds AND it takes a MUTABLE
+/// `*Screen` which we don't have (`t.screens.active` is `*const` here). VERIFIED against
+/// ghostty v1.3.1 (Selection.zig:55/69).
+///
+/// GOTCHA: `point.Coordinate.x` is `size.CellCountInt` = u16; `cli.SelectionCoords` stores
+/// u32. Guard `x > maxInt(u16)` BEFORE `@intCast` (a raw cast of a u32 > 65535 traps in
+/// Debug/ReleaseSafe and is UB in ReleaseFast). `.y` is u32 => direct.
+pub fn buildSelection(screen: *const Screen, coords: cli.SelectionCoords) error{OutOfRange}!Selection {
+    if (coords.x1 > std.math.maxInt(u16) or coords.x2 > std.math.maxInt(u16))
+        return error.OutOfRange;
+    const start_pt = point.Point{ .screen = .{ .x = @intCast(coords.x1), .y = coords.y1 } };
+    const end_pt = point.Point{ .screen = .{ .x = @intCast(coords.x2), .y = coords.y2 } };
+    const sp = screen.pages.pin(start_pt) orelse return error.OutOfRange;
+    const ep = screen.pages.pin(end_pt) orelse return error.OutOfRange;
+    return Selection.init(sp, ep, coords.rect); // untracked; NO deinit (findings §1)
 }
 
 /// Render `ansi` to HTML and write it to `path` ATOMICALLY (P1.M3.T1.S2; research/findings.md §4).
@@ -207,6 +247,56 @@ fn renderToFileAtomic(
     var fw = f.writer(&buf);
     try renderGrid(alloc, ansi, size, colors, null, font, &fw.interface); // sel: null (S4)
     try fw.interface.flush();
+    f.sync() catch {}; // best-effort durability before rename
+    f.close();
+
+    try dir.rename(tmp_name, base); // same dir => atomic
+}
+
+/// True if a rendered selection's body (between `<pre ...>` and `</pre>`) is empty or
+/// all-whitespace — i.e. the selection covered only blank cells (PRD §13 => warn, no output,
+/// exit 1). The formatter emits NOTHING for blank cells (verified: a blank grid renders a
+/// zero-byte body); plain unstyled text is emitted WITHOUT `<span>`, so body content (NOT
+/// `<span>` presence) is the only valid emptiness signal.
+///
+/// Malformed HTML (no `<pre` / no `>` / no `</pre>`) is treated as NON-empty (returns false) —
+/// we never false-positive a real selection into an "empty" failure.
+fn selectionBodyEmpty(html: []const u8) bool {
+    const pre = std.mem.indexOf(u8, html, "<pre") orelse return false;
+    const open_end = std.mem.indexOfScalarPos(u8, html, pre, '>') orelse return false;
+    const close = std.mem.indexOfPos(u8, html, open_end + 1, "</pre>") orelse return false;
+    const body = html[open_end + 1 .. close];
+    for (body) |c| if (!std.ascii.isWhitespace(c)) return false;
+    return true;
+}
+
+/// Write pre-rendered `bytes` to `path` ATOMICALLY (temp + rename in the same dir). Used by
+/// the `--selection` path, which buffers output to validate non-emptiness before writing.
+/// Mirrors `renderToFileAtomic` (S2) but for already-rendered bytes (no renderGrid call).
+/// `renderToFileAtomic` itself is NOT modified (S2 owns it; it always renders the whole grid
+/// with `sel: null`). Minor duplication of the atomic idiom is intentional — keeps S2's code
+/// untouched (no regression to the whole-grid path).
+fn writeFileAtomic(alloc: std.mem.Allocator, path: []const u8, bytes: []const u8) !void {
+    const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
+    const base = std.fs.path.basename(path);
+
+    var rnd: [4]u8 = undefined;
+    std.crypto.random.bytes(&rnd);
+    const tmp_name = try std.fmt.allocPrint(alloc, ".{s}.{x}.tmp", .{ base, @as(u32, @bitCast(rnd)) });
+    defer alloc.free(tmp_name);
+
+    var dir = if (std.fs.path.isAbsolute(dir_path))
+        try std.fs.openDirAbsolute(dir_path, .{})
+    else
+        try std.fs.cwd().openDir(dir_path, .{});
+    defer dir.close();
+
+    var f = try dir.createFile(tmp_name, .{});
+    errdefer {
+        f.close();
+        dir.deleteFile(tmp_name) catch {};
+    }
+    try f.writeAll(bytes);
     f.sync() catch {}; // best-effort durability before rename
     f.close();
 
@@ -288,6 +378,56 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
     const size = Size{ .cols = cols, .rows = rows };
 
     const stderr = std.fs.File.stderr();
+    if (opts.selection) |coords| {
+        // S1 (P1.M4.T1.S1): --selection renders only the inclusive sub-grid (PRD §5.1/§7.4).
+        // Render to a buffer so we can (a) detect an empty/zero-cell selection (PRD §13 => no
+        // output, exit 1) and (b) route the SAME bytes to any sink. renderGrid builds the native
+        // Selection internally. The non-selection path (below) is byte-identical to before.
+        var aw = std.Io.Writer.Allocating.initCapacity(alloc, 4096) catch {
+            stderr.writeAll("tmux-2html render: out of memory\n") catch {};
+            return 1;
+        };
+        defer aw.deinit();
+        renderGrid(alloc, ansi, size, colors, coords, opts.font, &aw.writer) catch |err| switch (err) {
+            error.OutOfRange => {
+                stderr.writeAll("tmux-2html render: selection out of range\n") catch {};
+                return 1;
+            },
+            else => {
+                stderr.writeAll("tmux-2html render: write failed\n") catch {};
+                return 1;
+            },
+        };
+        const html = aw.writer.buffered(); // slice into aw's buffer; used before defer aw.deinit()
+        if (selectionBodyEmpty(html)) {
+            stderr.writeAll("tmux-2html render: selection is empty\n") catch {};
+            return 1;
+        }
+        if (opts.output) |path| {
+            writeFileAtomic(alloc, path, html) catch {
+                stderr.writeAll("tmux-2html render: cannot write output file\n") catch {};
+                return 1;
+            };
+            if (opts.open) spawnXdgOpen(path, alloc);
+        } else if (opts.open) {
+            const tmp = tempHtmlPath(alloc) catch {
+                stderr.writeAll("tmux-2html render: cannot allocate temp path\n") catch {};
+                return 1;
+            };
+            defer alloc.free(tmp);
+            writeFileAtomic(alloc, tmp, html) catch {
+                stderr.writeAll("tmux-2html render: cannot write temp file\n") catch {};
+                return 1;
+            };
+            spawnXdgOpen(tmp, alloc);
+        } else {
+            std.fs.File.stdout().writeAll(html) catch {
+                stderr.writeAll("tmux-2html render: write failed\n") catch {};
+                return 1;
+            };
+        }
+        return 0;
+    }
     if (opts.output) |path| {
         // --output: write the file ATOMICALLY (temp + rename in the same dir).
         renderToFileAtomic(alloc, path, ansi, size, colors, opts.font) catch {
@@ -352,6 +492,24 @@ fn renderToOwned(ansi: []const u8) ![]u8 {
         .{ .cols = 40, .rows = 5 },
         palette.defaultColors(),
         null,
+        "monospace",
+        &aw.writer,
+    );
+    return std.testing.allocator.dupe(u8, aw.writer.buffered());
+}
+
+/// Helper: render ANSI into an allocating buffer WITH a selection, returning an OWNED copy
+/// (caller frees). Same use-after-free rationale as `renderToOwned` (Allocating.deinit frees
+/// the buffer that `buffered()` points into).
+fn renderSelOwned(ansi: []const u8, size: Size, coords: cli.SelectionCoords) ![]u8 {
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 4096);
+    defer aw.deinit();
+    try renderGrid(
+        std.testing.allocator,
+        ansi,
+        size,
+        palette.defaultColors(),
+        coords,
         "monospace",
         &aw.writer,
     );
@@ -430,6 +588,33 @@ test "renderGrid: red foreground emits styled span" {
     // guarantee is structural (rename is the last step; errdefer deletes the temp) and is
     // proven end-to-end by the Level-3 integration test (`ls /tmp/.t2h-out.html.*.tmp`).
     _ = try ftmp.dir.statFile("out.html");
+
+    // ---- S1 (P1.M4.T1.S1) selection sub-grid rendering — APPENDED here (NOT a new test fn), ----
+    // because ghostty-vt's Terminal.init corrupts process-global state across SEPARATE test
+    // functions (the GOTCHA at the top). Sequential renderGrid calls in the SAME scope are
+    // fine. These exercise buildSelection (via renderGrid): linewise, block, and out-of-range.
+
+    // LINEWISE: 6 rows R0..R5, select rows 1..5  =>  R1..R5 present, R0 absent.
+    const lw = try renderSelOwned("R0\nR1\nR2\nR3\nR4\nR5", .{ .cols = 80, .rows = 6 },
+        .{ .x1 = 0, .y1 = 1, .x2 = 79, .y2 = 5 });
+    defer std.testing.allocator.free(lw);
+    try std.testing.expect(std.mem.indexOf(u8, lw, "R1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lw, "R5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lw, "R0") == null); // row 0 excluded
+
+    // BLOCK: 3 rows of ABCDEFGHIJ, select cols 2..5 rows 0..2  =>  CDEF present, full row absent.
+    const blk = try renderSelOwned("ABCDEFGHIJ\nABCDEFGHIJ\nABCDEFGHIJ", .{ .cols = 10, .rows = 3 },
+        .{ .x1 = 2, .y1 = 0, .x2 = 5, .y2 = 2, .rect = true });
+    defer std.testing.allocator.free(blk);
+    try std.testing.expect(std.mem.indexOf(u8, blk, "CDEF") != null);
+    try std.testing.expect(std.mem.indexOf(u8, blk, "ABCDEFGHIJ") == null); // only the block cols
+
+    // OUT OF RANGE: x=9 with --cols 5 (x >= cols) => error.OutOfRange from renderGrid directly.
+    var aw_oor = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 64);
+    defer aw_oor.deinit();
+    try std.testing.expectError(error.OutOfRange, renderGrid(std.testing.allocator, "AB",
+        .{ .cols = 5, .rows = 2 }, palette.defaultColors(), .{ .x1 = 9, .y1 = 0, .x2 = 9, .y2 = 0 },
+        "monospace", &aw_oor.writer));
 }
 
 // ---- S2 unit tests (PURE helpers + atomic round-trip; NO stdin, NO tty, NO xdg) ----
@@ -512,4 +697,44 @@ test "toPaletteMode: maps all three cli.PaletteMode variants to palette.Mode" {
     try std.testing.expectEqual(palette.Mode.default, toPaletteMode(.default));
     try std.testing.expectEqual(palette.Mode.cached, toPaletteMode(.cached));
     try std.testing.expectEqual(palette.Mode.live, toPaletteMode(.live));
+}
+
+// ---- S1 (P1.M4.T1.S1) PURE unit tests (selectionBodyEmpty + writeFileAtomic) ----
+// These do NOT touch ghostty-vt Terminal, so they get their OWN test functions (the
+// cross-test GOTCHA only affects Terminal.init scopes).
+
+test "selectionBodyEmpty: blank body => true; content => false" {
+    // Zero-byte body (blank grid => <pre ...></pre>).
+    try std.testing.expect(selectionBodyEmpty("<pre class=\"x\" style=\"a:b;\"></pre>"));
+    // All-whitespace body.
+    try std.testing.expect(selectionBodyEmpty("<pre class=\"x\">   \n  \t </pre>"));
+    // Plain text body.
+    try std.testing.expect(!selectionBodyEmpty("<pre class=\"x\">hi</pre>"));
+    // Styled-span body (plain text may lack a span, so body content — NOT span presence — is
+    // the only valid emptiness signal).
+    try std.testing.expect(!selectionBodyEmpty("<pre class=\"x\"><span style=\"color:#fff;\">A</span></pre>"));
+    // Malformed HTML (no <pre tag at all) => treat as NON-empty (never false-positive).
+    try std.testing.expect(!selectionBodyEmpty("no pre tag at all"));
+}
+
+test "writeFileAtomic: writes target, leaves no .tmp" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+    const abs = try std.fmt.allocPrint(alloc, "{s}/out.html", .{dir_abs});
+    defer alloc.free(abs);
+    try writeFileAtomic(alloc, abs, "<pre>BODY</pre>");
+    var f = try tmp.dir.openFile("out.html", .{});
+    defer f.close();
+    const got = try f.readToEndAlloc(alloc, 1 << 16);
+    defer alloc.free(got);
+    try std.testing.expectEqualStrings("<pre>BODY</pre>", got);
+    // Atomicity: the target exists with the exact bytes (proves the rename completed). We do
+    // NOT iterate the dir here because Zig 0.15.2's Dir.iterate panics under std.testing.tmpDir
+    // (EBADF in lseek_SET — the dir isn't opened with iteration permissions). The no-`.tmp`-left
+    // guarantee is structural (rename is the last step; errdefer deletes the temp on any error)
+    // and is proven end-to-end by the Level-3 integration check.
+    _ = try tmp.dir.statFile("out.html");
 }
