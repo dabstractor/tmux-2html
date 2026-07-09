@@ -593,14 +593,14 @@
               "type": "Task",
               "id": "P3.M1.T1",
               "title": "tui/app.zig: terminal control + event loop + mouse",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Enter/restore the alt-screen + raw termios safely, run the read loop, and decode SGR mouse events.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P3.M1.T1.S1",
                   "title": "Alt-screen + raw termios + panic-safe restore + event loop",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1"
@@ -615,7 +615,7 @@
                   "type": "Subtask",
                   "id": "P3.M1.T1.S2",
                   "title": "Mouse mode enable + SGR mouse decode + input byte read",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P3.M1.T1.S1"

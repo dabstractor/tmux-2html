@@ -6,8 +6,25 @@ const cli = @import("cli.zig");
 const palette = @import("palette.zig");
 const capture = @import("capture.zig");
 const render_mod = @import("render.zig");
+const tui = @import("tui/app.zig");
 
 const version_string = build_options.version;
+
+// Root panic override (PRD §7.1 "Restore on exit, always, including panic"). std detects this via
+// @hasDecl(root, "panic"). The override calls tui.restoreRaw() (idempotent, guarded by the atomic
+// `entered` flag ⇒ a no-op when the TUI was never entered) BEFORE std.debug.defaultPanic so a
+// panic that fires while the TUI holds the terminal still restores cooked termios + primary
+// screen + visible cursor (and THEN prints the stack trace in cooked mode). panic_in_progress
+// guards against recursion if restoreRaw itself somehow panics.
+pub const panic = std.debug.FullPanic(struct {
+    fn panic(msg: []const u8, ra: ?usize) noreturn {
+        if (!tui.panic_in_progress) {
+            tui.panic_in_progress = true;
+            tui.restoreRaw();
+        }
+        std.debug.defaultPanic(msg, ra);
+    }
+}.panic);
 
 pub fn main() !u8 {
     var gpa = std.heap.DebugAllocator(.{}){};
@@ -468,6 +485,8 @@ test {
     _ = @import("golden_test.zig");
     // P2.M1: keep capture.zig unit tests reachable.
     _ = @import("capture.zig");
+    // P3.M1.T1.S1: keep tui/app.zig unit tests reachable (ghostty-free ⇒ separate test fns).
+    _ = @import("tui/app.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {
