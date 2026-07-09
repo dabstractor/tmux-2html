@@ -359,7 +359,7 @@
       "type": "Phase",
       "id": "P2",
       "title": "tmux Capture & Plugin",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Make the binary tmux-aware: capture panes (PRD §5.2), then ship the full TPM plugin (entrypoint, options, bindings) and the build-or-download binary acquisition (PRD §9, §10). After this phase a user installs via TPM and `prefix O` renders the pane. Depends on P1 (renderer + palette cache).",
       "milestones": [
         {
@@ -530,21 +530,21 @@
           "type": "Milestone",
           "id": "P2.M3",
           "title": "Binary Acquisition (ensure_binary.sh + download.sh)",
-          "status": "Planned",
+          "status": "Researching",
           "description": "The flipped-hybrid installer (PRD §10): build-from-source if Zig present, else download a verified prebuilt; never leave a half-written binary.",
           "tasks": [
             {
               "type": "Task",
               "id": "P2.M3.T1",
               "title": "ensure_binary.sh + download.sh",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Order: version-check → build → download-fallback; atomic install; loud failure.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M3.T1.S1",
                   "title": "ensure_binary.sh: version check → zig build → download fallback",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — Step1: if `$BIN/tmux-2html` exists and `--version` matches plugin → done. Step2: if `zig` on PATH → `zig build --release=fast` into bin dir. Step3: else → scripts/download.sh. Step4: any failure → `tmux display-message \"tmux-2html: install failed (see README)\"` + skip binding. Atomic rename (never half-written). Plugin version comes from a baked constant in the plugin (must match binary --version).\n2. INPUT: $TMUX_2HTML_BIN, expected version string.\n3. LOGIC: POSIX sh script; `set -eu`; detect zig via command -v; build to a temp then mv into bin; on any error, message + exit non-zero (caller skips binding).\n4. OUTPUT: `scripts/ensure_binary.sh` produces a working binary or fails loudly.\n5. DOCS: none — install flow documented in README (P4.M2).",
@@ -558,7 +558,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S2",
                   "title": "download.sh: platform triple → fetch → SHA256 verify → atomic extract",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P2.M3.T1.S1"

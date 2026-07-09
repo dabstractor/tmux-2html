@@ -5,6 +5,8 @@ build/
 # Zig build artifacts
 .zig-cache/
 zig-out/
+# Local Zig dependency package cache (fetched on demand; see build.zig.zon)
+zig-pkg/
 
 # Dependencies
 node_modules/
