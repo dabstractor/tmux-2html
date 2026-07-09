@@ -156,8 +156,38 @@ fi
 
 # ------------------------------------------------------------------
 # C-o region binding — P2.M2.T2.S2 (display-popup wrapper + .last-output sidecar)
-# Consumes: $region_key, $TMUX_2HTML_BIN, $binary_ready. NOT implemented here.
 # ------------------------------------------------------------------
+# PRD §9.3 + §7.5: prefix <region_key> (default C-o) opens a full-screen tmux
+# display-popup (a REAL pty — run-shell has no /dev/tty, so the region TUI + the
+# palette can only run inside the popup) running `tmux-2html region --target
+# #{pane_id}`. region resolves font/open/output-dir itself via show-option (do
+# NOT pass them — mirrors pane). The popup has NO tmux message channel, so on
+# confirm region writes the bare result path to $TMUX_2HTML_BIN/.last-output;
+# after the popup closes this wrapper reads it and flashes `tmux-2html: wrote
+# <path>` on the status line (the wrapper runs in run-shell's /bin/sh, which
+# HAS $TMUX). On cancel region exits 1 without writing; the pre-popup `rm -f`
+# keeps the sidecar absent so no stale message. Gated on binary_ready (§9.1).
+# region itself lands in P3 (it currently returns NotImplemented/exit 1, so
+# until P3 the popup opens then closes and shows nothing — inert but correct).
+# No set -e.
+#
+# Quoting (three layers — derived from the proven O binding, P2.M2.T2.S1):
+#   $TMUX_2HTML_BIN  → expanded NOW (exported vars don't reach run-shell
+#     children). Appears 3×: last=, the binary path, .last-output — all expand
+#     now.
+#   #{pane_id}       → stored LITERAL (run-shell expands it at fire time).
+#   "  \$( )  \$last  \$out  → deferred to fire time (run-shell's /bin/sh).
+# `last`/`out` vars avoid repeating the path AND avoid a nested $(cat "...")
+# inside display-message's double-quoted arg. The trailing if…fi returns 0
+# (cancel is silent).
+[ "$binary_ready" = 1 ] && tmux bind-key "$region_key" run-shell \
+    "last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\$last\"; tmux display-popup -E -w 100% -h 100% \"$TMUX_2HTML_BIN/tmux-2html region --target '#{pane_id}'\"; if [ -f \"\$last\" ]; then out=\$(cat \"\$last\"); tmux display-message \"tmux-2html: wrote \$out\"; fi"
+
+# Optional test seam (APPEND with >>; §4 already wrote with > and runs first
+# in file order). Records the region binding decision for deterministic tests.
+if [ -n "${TMUX_2HTML_DEBUG:-}" ]; then
+    printf 'region_bound=%s\n' "$([ "$binary_ready" = 1 ] && echo 1 || echo 0)" >> "$TMUX_2HTML_DEBUG"
+fi
 # ----------------------------------------------------------------------
 
 # ----------------------------------------------------------------------

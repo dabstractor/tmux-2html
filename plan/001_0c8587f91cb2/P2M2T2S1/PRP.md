@@ -389,8 +389,8 @@ case "$1" in
   show-option) printf '';;                 # unset ⇒ empty (read_opt applies defaults)
   display-message) :;;                     # no-op
   bind-key)
-    # record the FULL bind-key command line the loader issued
-    printf '%s\n' "$*" >> "$T2H_BIND_LOG"
+    printf 'key=%s\n' "$2" >> "$T2H_BIND_LOG"
+    printf 'body=%s\n' "$4" >> "$T2H_BIND_LOG"
     ;;
 esac
 EOF
@@ -405,34 +405,31 @@ run_case() {  # $1=label; sets up env then sources the loader; checks the bind l
 
 # (a) DEFAULTS + binary ready ⇒ exactly ONE bind-key (O full) with the right shape.
 mkdir -p "$work/home"; run_case a
-n=$(wc -l < "$work/bind.log"); [ "$n" = 1 ] && echo "PASS a: one bind-key issued"
-grep -q '^O ' "$work/bind.log" && echo "PASS a: bound key = O"
+n=$(grep -c '^key=' "$work/bind.log"); [ "$n" = 1 ] && echo "PASS a: one bind-key"
+grep -qx 'key=O' "$work/bind.log" && echo "PASS a: bound key = O"
 grep -q 'pane --full' "$work/bind.log" && echo "PASS a: full mode"
 grep -q "target '#{pane_id}'" "$work/bind.log" && echo "PASS a: #{pane_id} stored LITERALLY"
 grep -q 'display-message' "$work/bind.log" && echo "PASS a: notify via display-message"
-grep -q '"'"'"$bin"'"'"'/tmux-2html' "$work/bind.log" && echo "PASS a: \$TMUX_2HTML_BIN expanded at source time"
+grep -q "$bin/tmux-2html" "$work/bind.log" && echo "PASS a: \$TMUX_2HTML_BIN expanded at source time"
 # visible must be ABSENT in the defaults case:
 grep -q 'pane --visible' "$work/bind.log" && echo "FAIL a: visible bound by default" || echo "PASS a: no visible bind (unset)"
 
 # (b) visible-key SET ⇒ a SECOND bind-key (v visible).
-PATH="$fakebin:$PATH" HOME="$work/home" TMUX_PLUGIN_MANAGER_PATH="$pm" TMUX_2HTML_BIN="$bin" \
-  sh -c 'set --; . /dev/stdin' <<EOF 2>/dev/null || true
-# set the option by making the fake return it
-EOF
-# (easier: a fake that returns the visible-key value)
+# A fake whose show-option returns 'v' for @tmux-2html-visible-key (empty for everything else):
 cat > "$fakebin/tmux" <<'EOF'
 #!/usr/bin/env sh
 case "$1" in
-  show-option) case "$4" in *@tmux-2html-visible-key*) printf 'v';; *) printf '';; esac;;
+  show-option) case "$3" in *@tmux-2html-visible-key*) printf 'v';; *) printf '';; esac;;
   display-message) :;;
-  bind-key) printf '%s\n' "$*" >> "$T2H_BIND_LOG";;
+  bind-key) printf 'key=%s\n' "$2" >> "$T2H_BIND_LOG"; printf 'body=%s\n' "$4" >> "$T2H_BIND_LOG";;
 esac
 EOF
 chmod +x "$fakebin/tmux"
 rm -f "$work/bind.log"; export T2H_BIND_LOG="$work/bind.log"
 PATH="$fakebin:$PATH" HOME="$work/home" TMUX_PLUGIN_MANAGER_PATH="$pm" TMUX_2HTML_BIN="$bin" sh ./tmux-2html.tmux
-n=$(wc -l < "$work/bind.log"); [ "$n" = 2 ] && echo "PASS b: two bind-keys (O + v)"
-grep -q '^v ' "$work/bind.log" && grep -q 'pane --visible' "$work/bind.log" && echo "PASS b: visible bound to v"
+n=$(grep -c '^key=' "$work/bind.log"); [ "$n" = 2 ] && echo "PASS b: two bind-keys (O + v)"
+{ grep -qx 'key=O' "$work/bind.log" && grep -qx 'key=v' "$work/bind.log"; } && echo "PASS b: keys O and v"
+grep -A1 'key=v' "$work/bind.log" | grep -q 'pane --visible' && echo "PASS b: v -> pane --visible"
 
 # (c) binary NOT ready (missing executable) ⇒ NO bind-keys.
 rm -f "$bin/tmux-2html"

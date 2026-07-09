@@ -440,7 +440,7 @@
           "type": "Milestone",
           "id": "P2.M2",
           "title": "TPM Plugin (entrypoint, options, bindings)",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Create `tmux-2html.tmux` (PRD §9.1): resolve the binary, read @tmux-2html-* options, bind keys (PRD §9.3), and trigger the one-time palette auto-sync popup (PRD §6).",
           "tasks": [
             {
@@ -487,14 +487,14 @@
               "type": "Task",
               "id": "P2.M2.T2",
               "title": "Prefix-table bindings",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Bind O (full), the visible key (if set), and C-o (region popup) per PRD §9.3, with the .last-output sidecar notification for region.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T2.S1",
                   "title": "O (full) + visible bindings (run-shell pane)",
-                  "status": "Complete",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T1.S1",
@@ -510,7 +510,7 @@
                   "type": "Subtask",
                   "id": "P2.M2.T2.S2",
                   "title": "C-o region binding (display-popup wrapper) + .last-output sidecar",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T1.S1"
@@ -544,7 +544,7 @@
                   "type": "Subtask",
                   "id": "P2.M3.T1.S1",
                   "title": "ensure_binary.sh: version check → zig build → download fallback",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §10 — Step1: if `$BIN/tmux-2html` exists and `--version` matches plugin → done. Step2: if `zig` on PATH → `zig build --release=fast` into bin dir. Step3: else → scripts/download.sh. Step4: any failure → `tmux display-message \"tmux-2html: install failed (see README)\"` + skip binding. Atomic rename (never half-written). Plugin version comes from a baked constant in the plugin (must match binary --version).\n2. INPUT: $TMUX_2HTML_BIN, expected version string.\n3. LOGIC: POSIX sh script; `set -eu`; detect zig via command -v; build to a temp then mv into bin; on any error, message + exit non-zero (caller skips binding).\n4. OUTPUT: `scripts/ensure_binary.sh` produces a working binary or fails loudly.\n5. DOCS: none — install flow documented in README (P4.M2).",
