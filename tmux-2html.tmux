@@ -135,10 +135,46 @@ fi
 # ----------------------------------------------------------------------
 # ## Palette auto-sync popup (one-time) — P2.M2.T1.S2
 # ----------------------------------------------------------------------
-# Cache path (mirror src/palette.zig:240): ${XDG_CACHE_HOME:-$HOME/.cache}/tmux-2html/palette
-#   cache_home=${XDG_CACHE_HOME:-$HOME/.cache}; palette_cache="$cache_home/tmux-2html/palette"
-#   if [ ! -f "$palette_cache" ]; then
-#       tmux display-popup -E -w 100% -h 100% "$TMUX_2HTML_BIN/tmux-2html sync-palette --force"
-#   fi
-# TODO(P2.M2.T1.S2): implement one-time palette auto-sync here.
+# PRD §9.1 step 4 + §6: on first load, if no palette cache exists, pop a real
+# pty (tmux display-popup) running sync-palette, then close. The popup is the
+# controlling tty that run-shell (the binding context) lacks, so OSC palette
+# queries succeed there. Runs once; skipped while the cache exists. Non-fatal.
+
+# Cache path — mirror src/palette.zig cacheBase(): XDG_CACHE_HOME honored only
+# if set, non-empty, AND absolute; otherwise $HOME/.cache (same rule as §3
+# output-dir's data_home). The sh [ ! -f ] test must look at the SAME path the
+# binary writes/reads, or the popup would mis-fire.
+cache_home="$HOME/.cache"
+if [ -n "${XDG_CACHE_HOME:-}" ] && [ -n "$XDG_CACHE_HOME" ] \
+    && [ "${XDG_CACHE_HOME#/}" != "$XDG_CACHE_HOME" ]; then
+    cache_home=$XDG_CACHE_HOME      # set + non-empty + absolute (starts with /)
+fi
+palette_cache="$cache_home/tmux-2html/palette"
+
+# One-time trigger (item-contract command verbatim: 50%/50%, NO --force — the
+# [ ! -f ] guard already guarantees no cache, so sync-palette acquires anyway).
+# Gated on binary_ready so a missing binary doesn't error inside a popup.
+# `2>/dev/null || :` ⇒ non-fatal on old tmux / no client / sync-palette failure.
+if [ "$binary_ready" = 1 ] && [ ! -f "$palette_cache" ]; then
+    palette_autosync=1
+    tmux display-popup -E -w 50% -h 50% \
+        "$TMUX_2HTML_BIN/tmux-2html sync-palette" 2>/dev/null || :
+else
+    palette_autosync=0
+fi
+
+# Debug observability (APPEND with >>; §4 already wrote with > and runs first).
+if [ -n "${TMUX_2HTML_DEBUG:-}" ]; then
+    {
+        printf 'palette_cache=%s\n'   "$palette_cache"
+        printf 'palette_autosync=%s\n' "$palette_autosync"
+    } >> "$TMUX_2HTML_DEBUG"
+fi
+# ----------------------------------------------------------------------
+# WHY no --force:  sync-palette with no cache + no --force still acquires
+#   (syncPaletteDir shouldRun(cache_exists=false, force=false) == true). The
+#   stub's --force was a placeholder; the item contract omits it.
+# WHY 50% not 100%: item contract ("Wrap in a short popup, not 100%").
+# WHY display-popup not run-shell: run-shell has no /dev/tty (OSC fails); the
+#   popup is a real pty where queryColors succeeds (research_tmux.md Claim 2/3).
 # ----------------------------------------------------------------------
