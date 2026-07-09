@@ -230,7 +230,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "renderGrid() core pipeline (default colors) + render subcommand (stdin→stdout)",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -247,7 +247,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S2",
                   "title": "Sizing (--cols/--rows), --font, --output, --open",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1"

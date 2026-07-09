@@ -255,14 +255,18 @@ test {
     // test block is compiled ONLY in test mode. (palette is now imported on the exe path too,
     // since sync-palette runs queryColors — Gotcha 1: --release=fast is mandatory regardless.)
     _ = @import("palette.zig");
+    // P1.M3.T1.S1: keep render.zig tests reachable (renderGrid unit tests).
+    _ = @import("render.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {
-    // render/pane/region still reach a NotImplemented stub. sync-palette is now wired to
-    // its body (syncPaletteBody), so dispatch('sync-palette') would run queryColors against
-    // the REAL /dev/tty + write the REAL cache — never drive it from a unit test.
+    // `render` is now WIRED (P1.M3.T1.S1) — dispatch('render') runs render.run, which reads
+    // the REAL stdin, so it must NOT be driven from a unit test. `pane` and `region` still
+    // reach a NotImplemented stub. `sync-palette` is wired to syncPaletteBody, which would run
+    // queryColors against the REAL /dev/tty + write the REAL cache — never drive it from a test.
     const allocator = std.testing.allocator;
-    try std.testing.expectError(error.NotImplemented, dispatch(allocator, "render", &.{}));
+    try std.testing.expectError(error.NotImplemented, dispatch(allocator, "pane", &.{}));
+    try std.testing.expectError(error.NotImplemented, dispatch(allocator, "region", &.{}));
 }
 
 test "version string is non-empty" {

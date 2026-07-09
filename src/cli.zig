@@ -1,5 +1,6 @@
 const std = @import("std");
 const parg = @import("parg");
+const render_mod = @import("render.zig"); // P1.M3.T1.S1: wired so cli.render delegates to render_mod.run. Circular import cli<->render is legal (lazy resolution); parseRender stays pure/ghostty-free.
 
 // ============================================================================
 // P1.M1.T3.S2 — parg flag/option parser for all subcommands.
@@ -369,7 +370,6 @@ fn reportError(sub: []const u8, err: ParseError) !void {
 // Signature unchanged from T3.S1: (allocator, args) !u8.
 
 pub fn render(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    _ = allocator;
     if (hasHelpFlag(args)) {
         try write(std.fs.File.stdout(), render_help);
         return 0;
@@ -378,8 +378,7 @@ pub fn render(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
         try reportError("render", err);
         return 1;
     };
-    _ = opts; // body lands in P1.M3 (render.zig).
-    return error.NotImplemented;
+    return render_mod.run(allocator, opts);
 }
 
 pub fn pane(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
