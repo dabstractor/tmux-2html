@@ -1,8 +1,11 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 const parg = @import("parg");
 const cli = @import("cli.zig");
 const palette = @import("palette.zig");
+const capture = @import("capture.zig");
+const render_mod = @import("render.zig");
 
 const version_string = build_options.version;
 
@@ -87,7 +90,7 @@ fn dispatch(allocator: std.mem.Allocator, name: []const u8, sub_args: []const []
     if (std.mem.eql(u8, name, "render")) {
         return cli.render(allocator, sub_args);
     } else if (std.mem.eql(u8, name, "pane")) {
-        return cli.pane(allocator, sub_args);
+        return cli.pane(allocator, sub_args, paneBody);
     } else if (std.mem.eql(u8, name, "region")) {
         return cli.region(allocator, sub_args);
     } else if (std.mem.eql(u8, name, "sync-palette")) {
@@ -250,6 +253,209 @@ fn syncPaletteBody(allocator: std.mem.Allocator, opts: cli.SyncPaletteOpts) anye
     return result.code;
 }
 
+// ---- pane body (PRD §5.2 + §9 + §13) ----------------------------------------
+// The user-facing command: resolve a target pane, capture it via `tmux capture-pane`
+// (visible or full-scrollback, history-capped), resolve the palette from the CACHE (no
+// /dev/tty probe under run-shell), render the WHOLE grid to a collision-safe HTML file
+// (`<session>-<unixtime>-<pid>.html`) in the configured output dir — or to an explicit
+// `--output FILE`. Optionally `xdg-open`s the result. Exits 2 on capture/target errors.
+//
+// Mirrors syncPaletteDir/Body: a dir-scoped testable core (panePrepare) that does capture +
+// filename + dir + truncation computation WITHOUT renderGrid (the ghostty-vt single-test-
+// scope GOTCHA forbids a pane unit test that calls renderGrid), plus a prod wrapper (paneBody)
+// that resolves real paths, renders, and prints the summary. Target resolution is INJECTABLE
+// (panePrepare takes the resolved target) so the no-tty path is unit-testable without setenv.
+
+/// Result of the dir-scoped pane prepare core. `output_path`/`summary`/`notice` are
+/// allocator-owned (caller frees); `notice` is null unless the capture was truncated. The core
+/// does NO stdout I/O (mirrors SyncResult{code,summary}). `cap_ansi` is the OWNED captured ANSI
+/// so the prod wrapper can render it (the core frees it via freePaneResult).
+const PaneResult = struct {
+    code: u8,
+    summary: []u8,
+    output_path: []u8,
+    notice: ?[]u8,
+    cap_ansi: []u8,
+    cols: u16,
+    rows: u16,
+};
+
+/// Free every allocator-owned field of a PaneResult (idempotent over a zero-init result).
+fn freePaneResult(allocator: std.mem.Allocator, r: *PaneResult) void {
+    allocator.free(r.summary);
+    allocator.free(r.output_path);
+    if (r.notice) |n| allocator.free(n);
+    allocator.free(r.cap_ansi);
+}
+
+/// The pane process id for collision-safe filenames. Linux uses `getpid`; off-Linux the value
+/// collapses to 0 (unixtime alone still disambiguates concurrent runs within a second; the
+/// plugin's run-shell concurrency is coarse enough that this is acceptable). os/linux.zig:1841.
+fn currentPid() i32 {
+    return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+}
+
+/// Build a failure PaneResult (allocator-owned summary). The caller still must free the result's
+/// owned fields via freePaneResult; this helper allocates empty placeholders for the others so
+/// freePaneResult is always safe.
+fn failPane(allocator: std.mem.Allocator, code: u8, msg: []const u8) !PaneResult {
+    return .{
+        .code = code,
+        .summary = try std.fmt.allocPrint(allocator, "{s}", .{msg}),
+        .output_path = try allocator.alloc(u8, 0),
+        .notice = null,
+        .cap_ansi = try allocator.alloc(u8, 0),
+        .cols = 0,
+        .rows = 0,
+    };
+}
+
+/// The dir-scoped testable core (NO real tmux, NO renderGrid). `runner` is FakeTmux in tests,
+/// `capture.real` in prod; `target` is the RESOLVED pane id (the prod wrapper resolves it from
+/// `--target`/`$TMUX_PANE` so the no-tty path is unit-testable without setenv); `out_dir` is an
+/// absolute dir path the caller already ensured exists. Computes the capture, the collision-safe
+/// output path, and the truncation notice text (PRD §13). Returns a PaneResult; does NO stdout I/O.
+fn panePrepare(
+    allocator: std.mem.Allocator,
+    opts: cli.PaneOpts,
+    target: []const u8,
+    out_dir: []const u8,
+    runner: capture.Runner,
+) anyerror!PaneResult {
+    const mode: capture.Mode = if (opts.full) .full else .visible; // visible is the default
+
+    // Resolve @tmux-2html-history-limit (default 50000 if unset/empty/non-numeric).
+    const limit_opt = capture.queryOption(runner, allocator, "@tmux-2html-history-limit") catch
+        return failPane(allocator, 2, "cannot query tmux options");
+    defer allocator.free(limit_opt);
+    const configured_limit = std.fmt.parseInt(u32, std.mem.trim(u8, limit_opt, " \t\n\r"), 10) catch 50000;
+
+    // Capture (geometry + capture-pane). A bad target / unavailable tmux => exit 2.
+    const cap = capture.capture(runner, allocator, target, mode, opts.history, configured_limit) catch
+        return failPane(allocator, 2, "cannot capture pane (bad target or tmux unavailable)");
+    // cap.ansi is owned; we transfer ownership into PaneResult.cap_ansi (freed by freePaneResult).
+
+    // Resolve the output path. `--output FILE` wins; else build the collision-safe name from
+    // session + unixtime + pid into the configured output dir.
+    var path: []u8 = undefined;
+    var path_owned_by_us = false; // true when WE allocated path (not opts.output)
+    if (opts.output) |p| {
+        path = try allocator.dupe(u8, p);
+        path_owned_by_us = true;
+    } else {
+        const session = capture.querySessionName(runner, allocator, target) catch
+            return failPane(allocator, 2, "cannot resolve session name");
+        defer allocator.free(session);
+        const sess_trim = std.mem.trim(u8, session, " \t\n\r");
+        const ts = std.time.timestamp(); // Unix seconds, wall clock (palette.zig uses this)
+        const pid = currentPid();
+        const fname = try capture.buildOutputFilename(allocator, sess_trim, ts, pid);
+        defer allocator.free(fname);
+        path = try capture.buildOutputPath(allocator, out_dir, fname);
+        path_owned_by_us = true;
+    }
+    // From here `path` is owned by us; on any subsequent error we must free it.
+    if (!path_owned_by_us) unreachable; // both branches above set it true
+    errdefer allocator.free(path);
+
+    // Truncation NOTICE text (PRD §13). Computed here (cap is in scope) so it is unit-testable;
+    // the prod wrapper (paneBody) does the actual stderr/display-message I/O (core does NO I/O).
+    var notice: ?[]u8 = null;
+    errdefer if (notice) |n| allocator.free(n);
+    if (cap.truncated) {
+        notice = std.fmt.allocPrint(
+            allocator,
+            "tmux-2html: capture truncated to {d} history lines (pane had {d}); older output dropped",
+            .{ cap.effective, cap.history_size },
+        ) catch null; // best-effort; null falls back to the plain summary
+    }
+
+    const summary = if (notice != null)
+        try std.fmt.allocPrint(allocator, "wrote {s} (truncated)", .{path})
+    else
+        try std.fmt.allocPrint(allocator, "wrote {s}", .{path});
+
+    return .{
+        .code = 0,
+        .summary = summary,
+        .output_path = path,
+        .notice = notice,
+        .cap_ansi = cap.ansi,
+        .cols = cap.cols,
+        .rows = cap.rows,
+    };
+}
+
+/// The prod wrapper — resolve the REAL output dir + target, ensure the dir exists, prepare,
+/// render the whole grid to the output path (atomic temp+rename via renderToFileAtomic),
+/// print the summary, emit the truncation notice (stderr + best-effort display-message), and
+/// optionally xdg-open the result. Maps capture/write failures to exit 2/1. The body fn pointer
+/// type is `*const fn(Allocator, PaneOpts) anyerror!u8`, so this MUST be `anyerror!u8`.
+fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
+    const stdout = std.fs.File.stdout();
+    const stderr = std.fs.File.stderr();
+    const runner = capture.real;
+
+    // Resolve the target: --target wins; else $TMUX_PANE; else exit 2.
+    const target = opts.target orelse std.posix.getenv("TMUX_PANE") orelse {
+        try stdout.writeAll("error: no target pane ($TMUX_PANE unset and no --target)\n");
+        return 2;
+    };
+
+    // Resolve the output dir (PRD §9.2). Ensure it exists (idempotent).
+    const out_dir = capture.resolveOutputDir(runner, allocator) catch {
+        try stdout.writeAll("error: cannot determine output directory\n");
+        return 1;
+    };
+    defer allocator.free(out_dir);
+    std.fs.cwd().makePath(out_dir) catch {};
+
+    // Prepare (capture + filename + truncation text; NO render). capture failure => exit 2.
+    var result = try panePrepare(allocator, opts, target, out_dir, runner);
+    defer freePaneResult(allocator, &result);
+
+    // If prepare failed (bad target / unavailable tmux / option query error), short-circuit
+    // BEFORE rendering: the failure result has cols=0/rows=0/empty ansi, and feeding ghostty-vt
+    // a zero-dimension terminal (Terminal.init cols=0) segfaults. Report the summary + exit.
+    if (result.code != 0) {
+        try stdout.writeAll(result.summary);
+        try stdout.writeAll("\n");
+        return result.code;
+    }
+
+    // Render the WHOLE grid to the output path (atomic temp+rename). renderToFileAtomic calls
+    // renderGrid(sel:null) internally. Palette from CACHE (no /dev/tty under run-shell).
+    const colors = palette.resolve(allocator, .cached, palette.hasControllingTty()); // INFALLIBLE
+    render_mod.renderToFileAtomic(
+        allocator,
+        result.output_path,
+        result.cap_ansi,
+        .{ .cols = result.cols, .rows = result.rows },
+        colors,
+        opts.font,
+    ) catch {
+        try stdout.writeAll("error: cannot write output file\n");
+        return 1;
+    };
+
+    // Truncation notice (PRD §13): core computed the text into result.notice. stderr ALWAYS;
+    // display-message is best-effort (run-shell contexts without a tmux client still succeed).
+    if (result.notice) |n| {
+        stderr.writeAll(n) catch {};
+        stderr.writeAll("\n") catch {};
+        _ = runner.run(&.{ "tmux", "display-message", "-p", n }, allocator) catch {};
+    }
+
+    // Summary to stdout.
+    try stdout.writeAll(result.summary);
+    try stdout.writeAll("\n");
+
+    // --open: best-effort (never changes the exit code).
+    if (opts.open) render_mod.spawnXdgOpen(result.output_path, allocator);
+
+    return result.code;
+}
+
 test {
     // P1.M2: keep palette.zig tests reachable from the test root (src/main.zig). A top-level
     // test block is compiled ONLY in test mode. (palette is now imported on the exe path too,
@@ -260,15 +466,16 @@ test {
     // P1.M4.T2.S1: golden harness (color/attr/OSC8 testdata) — embeds testdata/* via the
     // "testdata" module wired in build.zig.
     _ = @import("golden_test.zig");
+    // P2.M1: keep capture.zig unit tests reachable.
+    _ = @import("capture.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {
-    // `render` is now WIRED (P1.M3.T1.S1) — dispatch('render') runs render.run, which reads
-    // the REAL stdin, so it must NOT be driven from a unit test. `pane` and `region` still
-    // reach a NotImplemented stub. `sync-palette` is wired to syncPaletteBody, which would run
-    // queryColors against the REAL /dev/tty + write the REAL cache — never drive it from a test.
+    // `render` is WIRED (P1.M3.T1.S1) and `pane` is WIRED (P2.M1.T2.S1) — both run real I/O
+    // (stdin / tmux / files), so they must NOT be driven from a unit test. Only `region` still
+    // reaches a NotImplemented stub. `sync-palette` runs queryColors against the REAL /dev/tty +
+    // writes the REAL cache — never drive it from a test.
     const allocator = std.testing.allocator;
-    try std.testing.expectError(error.NotImplemented, dispatch(allocator, "pane", &.{}));
     try std.testing.expectError(error.NotImplemented, dispatch(allocator, "region", &.{}));
 }
 
@@ -408,4 +615,171 @@ test "syncPaletteDir --from file <malformed> => exit 1" {
     defer alloc.free(result.summary);
 
     try std.testing.expectEqual(@as(u8, 1), result.code);
+}
+
+// ---- panePrepare unit tests (dir-scoped, FakeTmux + std.testing.tmpDir; NO renderGrid) ----
+// panePrepare is split from paneBody at the render seam so capture + filename + dir + truncation
+// logic is unit-testable WITHOUT ghostty-vt Terminal.init (the cross-test GOTCHA forbids a pane
+// unit test that calls renderGrid; render is already proven in render.zig's single scope).
+// target is INJECTABLE (panePrepare takes it resolved) so the no-tty path needs no setenv.
+
+/// Test double for the capture.Runner seam: returns canned bytes per tmux subcommand, with
+/// per-instance state (NO mutable global => no cross-test contamination). Mirrors capture.zig's
+/// FakeTmux but lives here (capture's is module-private). The pane_id is echoed for session_name.
+const PaneFake = struct {
+    cols: u16 = 80,
+    rows: u16 = 24,
+    history_size: u32 = 0,
+    ansi: []const u8 = "\x1b[31mhi\x1b[0m\n",
+    session: []const u8 = "mysess",
+    history_limit: ?[]const u8 = null, // @tmux-2html-history-limit value (null = unset)
+
+    fn run(ctx: *anyopaque, argv: []const []const u8, alloc: std.mem.Allocator) anyerror![]u8 {
+        const self: *PaneFake = @ptrCast(@alignCast(ctx));
+        // helper: does argv contain needle?
+        const hasArg = struct {
+            fn f(a: []const []const u8, needle: []const u8) bool {
+                for (a) |x| if (std.mem.eql(u8, x, needle)) return true;
+                return false;
+            }
+        }.f;
+
+        if (hasArg(argv, "display-message")) {
+            if (hasArg(argv, "#{pane_width} #{pane_height} #{history_size}"))
+                return std.fmt.allocPrint(alloc, "{d} {d} {d}", .{ self.cols, self.rows, self.history_size });
+            if (hasArg(argv, "#{session_name}"))
+                return alloc.dupe(u8, self.session);
+            return error.UnexpectedArgv;
+        }
+        if (hasArg(argv, "capture-pane")) return alloc.dupe(u8, self.ansi);
+        if (hasArg(argv, "show-option")) {
+            // argv = { "tmux", "show-option", "-gqv", name }
+            if (argv.len >= 4) {
+                const name = argv[argv.len - 1];
+                if (std.mem.eql(u8, name, "@tmux-2html-history-limit")) {
+                    if (self.history_limit) |v| return alloc.dupe(u8, v);
+                }
+            }
+            return alloc.alloc(u8, 0); // unset => empty
+        }
+        return error.UnexpectedArgv;
+    }
+};
+
+test "panePrepare: visible + no history => path under out_dir matching <session>-<digits>-<digits>.html" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+
+    var fake = PaneFake{}; // history_size 0, session "mysess"
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+    const opts = cli.PaneOpts{ .target = "%5", .visible = true };
+
+    var result = try panePrepare(alloc, opts, "%5", dir_abs, runner);
+    defer freePaneResult(alloc, &result);
+
+    try std.testing.expectEqual(@as(u8, 0), result.code);
+    // path is under out_dir
+    try std.testing.expect(std.mem.startsWith(u8, result.output_path, dir_abs));
+    // basename matches <sanitized-session>-<digits>-<digits>.html
+    const base = std.fs.path.basename(result.output_path);
+    try std.testing.expect(std.mem.startsWith(u8, base, "mysess-"));
+    try std.testing.expect(std.mem.endsWith(u8, base, ".html"));
+    // truncated flag absent (visible mode)
+    try std.testing.expect(result.notice == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.summary, "wrote ") != null);
+}
+
+test "panePrepare: full with big history_size + small history => notice set (truncated)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+
+    var fake = PaneFake{ .history_size = 100000, .history_limit = "500" };
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+    // --history 1000, configured limit 500 => effective 500; history_size 100000 > 500 => truncated
+    const opts = cli.PaneOpts{ .target = "%5", .full = true, .history = 1000 };
+
+    var result = try panePrepare(alloc, opts, "%5", dir_abs, runner);
+    defer freePaneResult(alloc, &result);
+    try std.testing.expectEqual(@as(u8, 0), result.code);
+    try std.testing.expect(result.notice != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.notice.?, "truncated") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.notice.?, "500") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.notice.?, "100000") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.summary, "(truncated)") != null);
+}
+
+test "panePrepare: --output FILE => path is exactly FILE (no auto-naming)" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+    const explicit = try std.fmt.allocPrint(alloc, "{s}/x.html", .{dir_abs});
+    defer alloc.free(explicit);
+
+    var fake = PaneFake{};
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+    const opts = cli.PaneOpts{ .target = "%5", .visible = true, .output = explicit };
+
+    var result = try panePrepare(alloc, opts, "%5", dir_abs, runner);
+    defer freePaneResult(alloc, &result);
+    try std.testing.expectEqual(@as(u8, 0), result.code);
+    try std.testing.expectEqualStrings(explicit, result.output_path);
+}
+
+test "panePrepare: capture failure (FakeTmux errors on geometry) => exit 2" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+
+    // A fake that always errors (simulates a bad pane id / unavailable tmux).
+    const ErrFake = struct {
+        fn run(_: *anyopaque, _: []const []const u8, _: std.mem.Allocator) anyerror![]u8 {
+            return error.TmuxNonZeroExit;
+        }
+    };
+    var fake = ErrFake{};
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = ErrFake.run };
+    const opts = cli.PaneOpts{ .target = "%999999", .visible = true };
+
+    var result = try panePrepare(alloc, opts, "%999999", dir_abs, runner);
+    defer freePaneResult(alloc, &result);
+    try std.testing.expectEqual(@as(u8, 2), result.code);
+    try std.testing.expect(std.mem.indexOf(u8, result.summary, "cannot capture pane") != null);
+}
+
+test "panePrepare: @tmux-2html-history-limit unset => defaults to 50000" {
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+
+    // history_size 60000 > effective 50000 (default, since limit unset) => truncated; but only in
+    // full mode. visible => not truncated regardless. Verify the default-limit path doesn't error.
+    var fake = PaneFake{ .history_size = 60000, .history_limit = null };
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+    const opts = cli.PaneOpts{ .target = "%5", .full = true, .history = 50000 };
+
+    var result = try panePrepare(alloc, opts, "%5", dir_abs, runner);
+    defer freePaneResult(alloc, &result);
+    try std.testing.expectEqual(@as(u8, 0), result.code);
+    try std.testing.expect(result.notice != null); // 60000 > 50000 default
+}
+
+test "currentPid: returns a non-negative pid on Linux" {
+    const pid = currentPid();
+    if (builtin.os.tag == .linux) {
+        try std.testing.expect(pid > 0);
+    } else {
+        try std.testing.expectEqual(@as(i32, 0), pid);
+    }
 }

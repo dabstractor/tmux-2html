@@ -381,8 +381,11 @@ pub fn render(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
     return render_mod.run(allocator, opts);
 }
 
-pub fn pane(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    _ = allocator;
+pub fn pane(
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    body: *const fn (std.mem.Allocator, PaneOpts) anyerror!u8,
+) !u8 {
     if (hasHelpFlag(args)) {
         try write(std.fs.File.stdout(), pane_help);
         return 0;
@@ -391,8 +394,7 @@ pub fn pane(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
         try reportError("pane", err);
         return 1;
     };
-    _ = opts; // body lands in P2.M1 (capture.zig + pane wiring).
-    return error.NotImplemented;
+    return body(allocator, opts);
 }
 
 pub fn region(allocator: std.mem.Allocator, args: []const []const u8) !u8 {

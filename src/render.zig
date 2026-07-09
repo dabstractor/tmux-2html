@@ -211,7 +211,7 @@ pub fn buildSelection(screen: *const Screen, coords: cli.SelectionCoords) error{
 /// The temp file's `*std.Io.Writer` is the SAME bridge S1 validated for stdout +
 /// Writer.Allocating (`var fw = f.writer(&buf); renderGrid(…, &fw.interface)`). No
 /// intermediate buffer => memory-efficient for large panes.
-fn renderToFileAtomic(
+pub fn renderToFileAtomic(
     alloc: std.mem.Allocator,
     path: []const u8,
     ansi: []const u8,
@@ -321,7 +321,7 @@ fn tempHtmlPath(alloc: std.mem.Allocator) ![]u8 {
 /// ~immediately (it hands off to the user's preferred app), so waiting never stalls the
 /// render. Any failure (xdg-open missing, headless, non-zero exit) is IGNORED — `--open`
 /// is best-effort ("open the output if you can; never fail the render because of it").
-fn spawnXdgOpen(path: []const u8, alloc: std.mem.Allocator) void {
+pub fn spawnXdgOpen(path: []const u8, alloc: std.mem.Allocator) void {
     var child = std.process.Child.init(&.{ "xdg-open", path }, alloc); // Child.zig:215
     child.stdin_behavior = .Ignore; // StdIo{Inherit,Ignore,Pipe,Close} (Child.zig:196)
     child.stdout_behavior = .Ignore;
