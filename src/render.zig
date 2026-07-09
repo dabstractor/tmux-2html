@@ -272,7 +272,11 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
     const ansi = try stdin.readToEndAlloc(alloc, MAX_STDIN); // File.zig:809; caller frees.
     defer alloc.free(ansi);
 
-    const colors = palette.defaultColors(); // S3: palette.resolve(alloc, mode, palette.hasControllingTty())
+    // S3: honor --palette MODE via palette.resolve (PRD §6 precedence: cached→live→default).
+    // resolve is INFALLIBLE (returns Colors, NOT !Colors) => NO `try`. The allocator is the
+    // FIRST arg (the contract snippet omitted it); opts.palette_mode is cli.PaletteMode, a
+    // DISTINCT type from palette.Mode (identical variant names) bridged by toPaletteMode.
+    const colors = palette.resolve(alloc, toPaletteMode(opts.palette_mode), palette.hasControllingTty());
 
     // Smart sizing (S2). determineCols: explicit --cols wins; else getSize() if a controlling
     // tty exists; else error.SizeRequired => exit 2 (with a stderr msg naming --cols).
@@ -476,10 +480,36 @@ test "tempHtmlPath: ends with .html and contains /tmux-2html-" {
     try std.testing.expect(std.mem.indexOf(u8, p, "/tmux-2html-") != null);
 }
 
+/// cli.PaletteMode -> palette.Mode bridge (P1.M3.T1.S3). The two enums are DISTINCT types
+/// by design (cli.zig must stay ghostty-free; palette.zig must NOT import cli.zig) but
+/// share variant names. resolve() takes palette.Mode; opts.palette_mode is cli.PaletteMode.
+/// A switch (not @intFromEnum/@enumFromInt) is robust to declaration reordering and
+/// self-documents the 1:1 mapping.
+fn toPaletteMode(m: cli.PaletteMode) palette.Mode {
+    return switch (m) {
+        .default => .default,
+        .cached => .cached,
+        .live => .live,
+    };
+}
+
 test "spawnXdgOpen: does not crash on a bogus path (xdg-open absent => ignored)" {
     // Best-effort: in CI xdg-open is absent => spawn() fails => swallowed; the call returns.
     // On a desktop with xdg-open it would open /nonexistent (which xdg-open tolerates). Either
     // way this must not crash or leak (spawnXdgOpen takes the allocator only for Child.init,
     // which does not retain it after wait/return).
     spawnXdgOpen("/nonexistent", std.testing.allocator);
+}
+
+// ---- S3 unit test (the bridge; PURE — no tty, no stdin, no ghostty-vt init) ----
+// resolve's own precedence is already exhaustively covered by palette.zig's 7 resolve/
+// resolveDir tests. The bridge is the ONLY new logic in render.zig, so testing it here is
+// sufficient + cheap. This does NOT call renderGrid and does NOT spawn ghostty-vt
+// Terminal, so it does NOT collide with the S1 single-renderGrid-test-scope GOTCHA.
+// Assert enum tags (NOT hex values) — the Colors values are palette.zig's responsibility.
+
+test "toPaletteMode: maps all three cli.PaletteMode variants to palette.Mode" {
+    try std.testing.expectEqual(palette.Mode.default, toPaletteMode(.default));
+    try std.testing.expectEqual(palette.Mode.cached, toPaletteMode(.cached));
+    try std.testing.expectEqual(palette.Mode.live, toPaletteMode(.live));
 }

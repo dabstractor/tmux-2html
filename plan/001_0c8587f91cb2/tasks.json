@@ -216,14 +216,14 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Core Renderer (render subcommand: ANSI → HTML)",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Implement `src/render.zig` exposing the shared render primitive used by ALL capture paths: feed ANSI into a sized ghostty Terminal → ScreenFormatter → HTML. Deliver the `render` subcommand with sizing, font, output, open, and palette flags.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "render.zig core pipeline + options",
-              "status": "Ready",
+              "status": "Complete",
               "description": "The shared renderer: Terminal→vtStream→ScreenFormatter→HTML, with sizing/output/open/palette.",
               "subtasks": [
                 {
@@ -262,7 +262,7 @@
                   "type": "Subtask",
                   "id": "P1.M3.T1.S3",
                   "title": "--palette MODE flag (cached→live→default via palette.resolve)",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M3.T1.S1",
