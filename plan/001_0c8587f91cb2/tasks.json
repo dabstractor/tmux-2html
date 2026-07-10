@@ -674,7 +674,7 @@
           "type": "Milestone",
           "id": "P3.M2",
           "title": "TUI Input & Selection Model",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Key decoding + the full vim/arrow motion set + search (tui/input.zig), and the selection model with coordinate→Selection conversion (tui/select.zig).",
           "tasks": [
             {
@@ -720,7 +720,7 @@
               "type": "Task",
               "id": "P3.M2.T2",
               "title": "tui/select.zig: selection model + coordinate conversion",
-              "status": "Ready",
+              "status": "Complete",
               "description": "The linewise/block selection model (PRD §7.4) and the conversion to a ghostty Selection for rendering.",
               "subtasks": [
                 {
@@ -741,7 +741,7 @@
                   "type": "Subtask",
                   "id": "P3.M2.T2.S2",
                   "title": "Coordinate → Selection (pin) conversion; clamp + wide-cell rounding",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P3.M2.T2.S1",
@@ -775,7 +775,7 @@
                   "type": "Subtask",
                   "id": "P3.M3.T1.S1",
                   "title": "region.zig: capture full scrollback → grid → launch TUI",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M1.T1.S2",

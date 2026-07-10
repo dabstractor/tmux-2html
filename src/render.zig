@@ -21,6 +21,8 @@ const Screen = ghostty_vt.Screen; // *const Screen param of buildSelection
 const fmt = @import("ghostty_format.zig"); // vendored: ScreenFormatter, Options (has font)
 const palette = @import("palette.zig"); // Colors, defaultColors()
 const cli = @import("cli.zig"); // RenderOpts
+const select = @import("tui/select.zig"); // P3.M2.T2.S1: Sel.extent — the PURE TUI selection model (CONSUME as a contract)
+const view = @import("tui/view.zig"); // P3.M1.T2: view.Selection (structurally identical to cli.SelectionCoords; the clampExtent bridge target)
 
 /// Geometry for the virtual terminal. cols/rows are u16 to match ghostty `size.CellCountInt`
 /// exactly (ghostty size.zig:22), which is what `Terminal.Options` wants.
@@ -196,6 +198,101 @@ pub fn buildSelection(screen: *const Screen, coords: cli.SelectionCoords) error{
     const sp = screen.pages.pin(start_pt) orelse return error.OutOfRange;
     const ep = screen.pages.pin(end_pt) orelse return error.OutOfRange;
     return Selection.init(sp, ep, coords.rect); // untracked; NO deinit (findings §1)
+}
+
+// ---- P3.M2.T2.S2: TUI -> ghostty Selection bridge (the confirm-render input) ----
+// S2 is the ONLY thing that converts a PURE TUI `select.Sel` into a native ghostty `Selection`
+// against the LOADED screen. It REUSES `buildSelection` (the P1.M4.T1.S1 recipe: point.Point ->
+// screen.pages.pin -> Selection.init) — it does NOT re-implement pin/Selection logic. S2's only
+// NEW logic is the CLAMP (defensive grid-bounds normalization, so the TUI path is infallible
+// where the CLI --selection path errors) + the `select.Sel.extent` -> `cli.SelectionCoords`
+// bridge + grid-row discovery.
+//
+// PRD §13 "wide cells selected atomically (round to cell boundaries)" is SATISFIED BY
+// DELEGATION to the vendored formatter (src/ghostty_format.zig): PageFormatter rounds start_x
+// BACK from a wide cell's `.spacer_tail` (~line 808) and skips spacers in emission (~line 1019),
+// so a glyph is never split. S2 does NOT inspect cell.wide and does NOT round — rounding here
+// would double-round against the formatter and risk off-by-one glyph splits (the key insight
+// that keeps S2 a small, safe, 1-point task).
+
+/// Convert a TUI selection model into a native ghostty `Selection` against the LOADED screen,
+/// clamping to the grid and DELEGATING wide-cell atomicity to the formatter (PRD §13).
+///
+/// REUSES the P1.M4.T1.S1 recipe via `buildSelection` (point.Point -> screen.pages.pin ->
+/// Selection.init). `cols` is the TUI viewport width (passed to `sel.extent` for the linewise
+/// full-row bound x2 = cols-1); x is then clamped to the ACTUAL grid width `screen.pages.cols`.
+///
+/// PRD §7.4 mapping (produced by `sel.extent`, consumed here):
+///   linewise -> Selection{ (0,r1)..(cols-1,r2), rectangle=false }
+///   block    -> Selection{ (c1,r1)..(c2,r2), rectangle=true }
+///
+/// Infallible (returns `Selection`, NOT an error union): clamping guarantees every coord is a
+/// valid grid cell, so `buildSelection` (which can only fail on out-of-range) cannot error
+/// here. This is the behavioral delta vs the CLI `--selection` path, which REJECTS
+/// out-of-range coords with `error.OutOfRange` — the TUI confirm path is robust (it clamps).
+/// An INACTIVE `sel` (`extent` -> null) yields a WHOLE-GRID selection (top-left..bottom-right),
+/// matching the formatter's own null-selection = whole-grid semantics — but the confirm call
+/// site (P3.M3.T1.S2) only calls this when `sel.active()`.
+///
+/// OWNERSHIP: the returned Selection is UNTRACKED (`Selection.init` creates untracked bounds —
+/// no heap, no tracking handles). `Selection.deinit` is a NO-OP for untracked bounds AND it
+/// requires a MUTABLE `*Screen` the caller lacks (`t.screens.active` is `*const`), so the
+/// caller does NOT call `deinit` — identical to the existing `buildSelection` invariant
+/// (verified against ghostty v1.3.1 Selection.zig:55/69). The caller owns the value's
+/// lifetime; for the untracked value that means "drop it when done" (no free needed).
+pub fn toGhosttySelection(sel: select.Sel, screen: *const Screen, cols: u16) Selection {
+    const ext = sel.extent(cols) orelse return wholeGridSelection(screen);
+    const last_row = gridLastRow(screen); // u32; 0 if the screen has no rows (guarded)
+    const coords = clampExtent(ext, screen.pages.cols, last_row);
+    // Clamped -> every coord is a valid grid cell -> buildSelection cannot error. The `catch`
+    // is a defensive fallback (no UB in ReleaseFast): on the structurally-unreachable error
+    // it renders the whole grid rather than trap.
+    return buildSelection(screen, coords) catch wholeGridSelection(screen);
+}
+
+/// PURE: clamp a (normalized) `view.Selection` extent to grid bounds -> `cli.SelectionCoords`
+/// safe to hand to `buildSelection`. x -> [0,cols-1]; y -> [0,last_row]. Re-normalizes order via
+/// min/max (defensive — `select.extent` already min/max's). `cols==0` -> x collapses to 0.
+/// NO Terminal, NO ghostty state -> unit-testable as a SEPARATE `test` fn (mirrors
+/// render.zig's determineCols/lineCount). `view.Selection` and `cli.SelectionCoords` are
+/// STRUCTURALLY IDENTICAL ({x1,y1,x2,y2:u32, rect:bool=false}); this is the 1:1 bridge.
+///
+/// All coords are u32 (always >= 0) so only the HIGH side is clamped via `@min`. The lone
+/// subtract is `cols-1` (cols is u16): widen via `@as(u32, cols)` AFTER the `cols==0` guard to
+/// avoid u32 underflow.
+pub fn clampExtent(ext: view.Selection, cols: u16, last_row: u32) cli.SelectionCoords {
+    const last_col: u32 = if (cols == 0) 0 else @as(u32, cols) - 1;
+    const nx1 = @min(ext.x1, ext.x2); // normalize order (defensive)
+    const nx2 = @max(ext.x1, ext.x2);
+    const ny1 = @min(ext.y1, ext.y2);
+    const ny2 = @max(ext.y1, ext.y2);
+    return .{
+        .x1 = @min(nx1, last_col), // u32 >= 0 always; only clamp the high side
+        .y1 = @min(ny1, last_row),
+        .x2 = @min(nx2, last_col),
+        .y2 = @min(ny2, last_row),
+        .rect = ext.rect,
+    };
+}
+
+/// The last row index of the loaded screen (0-based). Mirrors `view.zig`'s `total_rows`
+/// computation: getBottomRight(.screen) + pointFromPin -> coord.y. Returns 0 if the screen has
+/// no addressable bottom-right (guarded — never happens for an initialized Terminal, which
+/// always has >=1 page). Used to clamp y so `pages.pin` never returns null.
+fn gridLastRow(screen: *const Screen) u32 {
+    const br = screen.pages.getBottomRight(.screen) orelse return 0;
+    const br_pt = screen.pages.pointFromPin(.screen, br) orelse return 0;
+    return br_pt.coord().y; // last row index (total_rows = y+1)
+}
+
+/// A whole-grid (untracked) Selection: top-left..bottom-right, rectangle=false. The fallback
+/// for an INACTIVE sel and the (structurally unreachable) buildSelection error.
+/// `getBottomRight(.screen)` does `self.pages.last.?` — safe for any initialized Terminal
+/// (Terminal.init creates >=1 page). `orelse tl` is a belt-and-suspenders guard.
+fn wholeGridSelection(screen: *const Screen) Selection {
+    const tl = screen.pages.getTopLeft(.screen);
+    const br = screen.pages.getBottomRight(.screen) orelse tl;
+    return Selection.init(tl, br, false); // untracked; no deinit (see toGhosttySelection)
 }
 
 /// Render `ansi` to HTML and write it to `path` ATOMICALLY (P1.M3.T1.S2; research/findings.md §4).
@@ -516,6 +613,29 @@ fn renderSelOwned(ansi: []const u8, size: Size, coords: cli.SelectionCoords) ![]
     return std.testing.allocator.dupe(u8, aw.writer.buffered());
 }
 
+/// Helper (P3.M2.T2.S2): format a NATIVE ghostty Selection (the output of toGhosttySelection)
+/// against an ALREADY-LOADED screen into an allocating buffer, returning an OWNED copy (caller
+/// frees). CRITICAL: the Selection's pins MUST be valid for THIS screen (pins are tied to the
+/// specific PageList they were created from) — so the caller passes the SAME screen it built the
+/// Selection against. This is the toGhosttySelection equivalent of renderSelOwned (which takes
+/// cli.SelectionCoords); it lets the S2 Terminal-scope tests FORMAT a toGhosttySelection result
+/// and assert on the HTML. No internal Terminal (the screen is the caller's).
+fn formatSelOnScreen(screen: *const Screen, gs: ?Selection) ![]u8 {
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 4096);
+    defer aw.deinit();
+    var f = fmt.ScreenFormatter.init(screen, .{
+        .emit = .html,
+        .background = palette.defaultColors().background,
+        .foreground = palette.defaultColors().foreground,
+        .palette = &palette.defaultColors().palette,
+        .font = "monospace",
+    });
+    f.content = .{ .selection = gs };
+    f.extra = .styles;
+    try aw.writer.print("{f}", .{f});
+    return std.testing.allocator.dupe(u8, aw.writer.buffered());
+}
+
 test "renderGrid: red foreground emits styled span" {
     // All renderGrid assertions live in THIS test because ghostty-vt's Terminal corrupts
     // process-global state across separate test functions (see the GOTCHA above). Sequential
@@ -615,6 +735,171 @@ test "renderGrid: red foreground emits styled span" {
     try std.testing.expectError(error.OutOfRange, renderGrid(std.testing.allocator, "AB",
         .{ .cols = 5, .rows = 2 }, palette.defaultColors(), .{ .x1 = 9, .y1 = 0, .x2 = 9, .y2 = 0 },
         "monospace", &aw_oor.writer));
+
+    // ---- S2 (P3.M2.T2.S2) toGhosttySelection / gridLastRow / wholeGridSelection assertions ----
+    // APPENDED here (NOT a new test fn) because toGhosttySelection/gridLastRow/wholeGridSelection
+    // touch the LOADED screen => they need a Terminal in scope => the ghostty-vt cross-test GOTCHA
+    // applies (a Terminal.init in a SEPARATE test fn crashes). These build their OWN Terminal
+    // (via formatSelOnScreen + inline Terminal.init) within THIS shared scope. Each block sets
+    // up a select.Sel by hand (.anchor/.cursor/.mode — NO input/motion import), calls
+    // toGhosttySelection, and verifies via pin->pointFromPin round-trip + ScreenFormatter output.
+
+    // (S2-a) LINEWISE: 6 rows R0..R5, sel linewise anchor(0,1) cursor(0,5) cols=80.
+    //   toGhosttySelection -> Selection whose start/end pins round-trip to {0,1}/{79,5},
+    //   rectangle==false. Formatting it emits R1..R5, NOT R0 (reuses the S1 golden shape).
+    {
+        var t = try Terminal.init(std.testing.allocator, .{ .cols = 80, .rows = 6 });
+        defer t.deinit(std.testing.allocator);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("R0\nR1\nR2\nR3\nR4\nR5") |c| {
+            if (c == '\n') try stream.next('\r');
+            try stream.next(c);
+        }
+        const screen = t.screens.active;
+        const sel = select.Sel{
+            .anchor = .{ .x = 0, .y = 1 },
+            .cursor = .{ .x = 0, .y = 5 },
+            .mode = .linewise,
+        };
+        const gs = toGhosttySelection(sel, screen, 80);
+        // Pin round-trip: gs.start()/end() -> pointFromPin(.screen, pin) -> coord().
+        const s = screen.pages.pointFromPin(.screen, gs.start()).?.coord();
+        const e = screen.pages.pointFromPin(.screen, gs.end()).?.coord();
+        try std.testing.expectEqual(@as(u16, 0), s.x); // linewise start x = 0
+        try std.testing.expectEqual(@as(u32, 1), s.y); // start row = 1
+        try std.testing.expectEqual(@as(u16, 79), e.x); // linewise end x = cols-1 = 79
+        try std.testing.expectEqual(@as(u32, 5), e.y); // end row = 5
+        try std.testing.expectEqual(false, gs.rectangle);
+        // Format the Selection -> HTML has R1..R5, NOT R0.
+        const html = try formatSelOnScreen(screen, gs);
+        defer std.testing.allocator.free(html);
+        try std.testing.expect(std.mem.indexOf(u8, html, "R1") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "R5") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "R0") == null); // row 0 excluded
+    }
+
+    // (S2-b) BLOCK: 3 rows of ABCDEFGHIJ, sel block anchor(2,0) cursor(5,2) cols=10.
+    //   -> Selection start/end pins round-trip to {2,0}/{5,2}, rectangle==true.
+    //   Formatting it emits "CDEF", NOT full rows.
+    {
+        var t = try Terminal.init(std.testing.allocator, .{ .cols = 10, .rows = 3 });
+        defer t.deinit(std.testing.allocator);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("ABCDEFGHIJ\nABCDEFGHIJ\nABCDEFGHIJ") |c| {
+            if (c == '\n') try stream.next('\r');
+            try stream.next(c);
+        }
+        const screen = t.screens.active;
+        const sel = select.Sel{
+            .anchor = .{ .x = 2, .y = 0 },
+            .cursor = .{ .x = 5, .y = 2 },
+            .mode = .block,
+        };
+        const gs = toGhosttySelection(sel, screen, 10);
+        const s = screen.pages.pointFromPin(.screen, gs.start()).?.coord();
+        const e = screen.pages.pointFromPin(.screen, gs.end()).?.coord();
+        try std.testing.expectEqual(@as(u16, 2), s.x);
+        try std.testing.expectEqual(@as(u32, 0), s.y);
+        try std.testing.expectEqual(@as(u16, 5), e.x);
+        try std.testing.expectEqual(@as(u32, 2), e.y);
+        try std.testing.expectEqual(true, gs.rectangle);
+        const html = try formatSelOnScreen(screen, gs);
+        defer std.testing.allocator.free(html);
+        try std.testing.expect(std.mem.indexOf(u8, html, "CDEF") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "ABCDEFGHIJ") == null); // only the block cols
+    }
+
+    // (S2-c) CLAMP (the TUI delta): sel linewise with cursor.y BEYOND the grid (100 on a 6-row
+    //   grid) -> toGhosttySelection CLAMPS y to gridLastRow (5) instead of error.OutOfRange.
+    //   Contrast: the CLI --selection path (above) errors on out-of-range. (No assertError here.)
+    {
+        var t = try Terminal.init(std.testing.allocator, .{ .cols = 80, .rows = 6 });
+        defer t.deinit(std.testing.allocator);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("R0\nR1\nR2\nR3\nR4\nR5") |c| {
+            if (c == '\n') try stream.next('\r');
+            try stream.next(c);
+        }
+        const screen = t.screens.active;
+        try std.testing.expectEqual(@as(u32, 5), gridLastRow(screen)); // 6 rows => last index 5
+        const sel = select.Sel{
+            .anchor = .{ .x = 0, .y = 1 },
+            .cursor = .{ .x = 0, .y = 100 }, // BEYOND the grid
+            .mode = .linewise,
+        };
+        const gs = toGhosttySelection(sel, screen, 80); // infallible: clamps, no error
+        const s = screen.pages.pointFromPin(.screen, gs.start()).?.coord();
+        const e = screen.pages.pointFromPin(.screen, gs.end()).?.coord();
+        try std.testing.expectEqual(@as(u32, 1), s.y); // start row = 1
+        try std.testing.expectEqual(@as(u32, 5), e.y); // end row CLAMPED 100 -> 5
+        try std.testing.expectEqual(false, gs.rectangle);
+    }
+
+    // (S2-d) INACTIVE => whole-grid: sel mode=.none -> a whole-grid Selection spanning
+    //   top-left..bottom-right (formatting it emits the FULL grid). extent() returns null when
+    //   mode==.none, so toGhosttySelection falls back to wholeGridSelection.
+    {
+        var t = try Terminal.init(std.testing.allocator, .{ .cols = 10, .rows = 2 });
+        defer t.deinit(std.testing.allocator);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("AB\nCD") |c| {
+            if (c == '\n') try stream.next('\r');
+            try stream.next(c);
+        }
+        const screen = t.screens.active;
+        const sel = select.Sel{ .mode = .none }; // inactive
+        try std.testing.expect(!sel.active());
+        const gs = toGhosttySelection(sel, screen, 10);
+        // whole-grid: start = top-left (0,0), end = bottom-right. A 2x10 grid => end {9,1}.
+        const s = screen.pages.pointFromPin(.screen, gs.start()).?.coord();
+        const e = screen.pages.pointFromPin(.screen, gs.end()).?.coord();
+        try std.testing.expectEqual(@as(u16, 0), s.x);
+        try std.testing.expectEqual(@as(u32, 0), s.y);
+        try std.testing.expectEqual(@as(u16, 9), e.x); // cols-1
+        try std.testing.expectEqual(@as(u32, 1), e.y); // gridLastRow
+        try std.testing.expectEqual(false, gs.rectangle);
+        // Formatting the whole-grid Selection emits BOTH rows (full grid).
+        const html = try formatSelOnScreen(screen, gs);
+        defer std.testing.allocator.free(html);
+        try std.testing.expect(std.mem.indexOf(u8, html, "AB") != null);
+        try std.testing.expect(std.mem.indexOf(u8, html, "CD") != null);
+    }
+
+    // (S2-e) WIDE-CELL ATOMICITY (PRD §13 by DELEGATION): feed a wide glyph (真 U+771F =
+    //   UTF-8 e7 9c 9f) at col 0 (occupies cols 0-1; col 1 is spacer_tail) into cols=4 rows=1;
+    //   sel linewise covering row 0. The Selection's start pin maps to x=0 (the .wide cell).
+    //   Formatting it emits the glyph EXACTLY ONCE (the formatter rounds start back from
+    //   spacer_tail + skips spacers in emission; S2 did nothing special). This PROVES PRD §13
+    //   is satisfied by delegation to the formatter, NOT by S2 hand-rolling rounding.
+    {
+        var t = try Terminal.init(std.testing.allocator, .{ .cols = 4, .rows = 1 });
+        defer t.deinit(std.testing.allocator);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("\xe7\x9c\x9f") |c| try stream.next(c); // 真
+        const screen = t.screens.active;
+        const sel = select.Sel{
+            .anchor = .{ .x = 0, .y = 0 },
+            .cursor = .{ .x = 0, .y = 0 },
+            .mode = .linewise,
+        };
+        const gs = toGhosttySelection(sel, screen, 4);
+        // Format the Selection -> the wide glyph appears EXACTLY ONCE. The formatter HTML-encodes
+        // the codepoint as a NUMERIC character reference (&#30495; for 真 U+771F), so we count
+        // THAT (not the raw UTF-8 bytes). The spacer cell (col 1) emits NOTHING (formatter skips
+        // spacers), so the glyph appears exactly once — proving PRD §13 atomicity by DELEGATION
+        // (S2 did nothing special; the formatter rounds start back from spacer_tail + skips
+        // spacers in emission).
+        const html = try formatSelOnScreen(screen, gs);
+        defer std.testing.allocator.free(html);
+        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "&#30495;"));
+        // Sanity: the raw UTF-8 bytes do NOT appear (the formatter encoded them).
+        try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, html, "\xe7\x9c\x9f"));
+    }
 }
 
 // ---- S2 unit tests (PURE helpers + atomic round-trip; NO stdin, NO tty, NO xdg) ----
@@ -737,4 +1022,79 @@ test "writeFileAtomic: writes target, leaves no .tmp" {
     // guarantee is structural (rename is the last step; errdefer deletes the temp on any error)
     // and is proven end-to-end by the Level-3 integration check.
     _ = try tmp.dir.statFile("out.html");
+}
+
+// ---- P3.M2.T2.S2 PURE unit tests (clampExtent — NO Terminal -> separate test fns, safe) ----
+// clampExtent is PURE (no ghostty-vt state) -> it gets its OWN test functions, exactly like
+// determineCols/lineCount/selectionBodyEmpty above. The cross-test GOTCHA (Terminal.init
+// corrupts process-global state across SEPARATE test fns) does NOT apply here. view.Selection
+// and cli.SelectionCoords are STRUCTURALLY IDENTICAL ({x1,y1,x2,y2:u32, rect:bool=false}).
+
+test "clampExtent: linewise in-range passthrough (no clamp)" {
+    const got = clampExtent(.{ .x1 = 0, .y1 = 2, .x2 = 79, .y2 = 7, .rect = false }, 80, 23);
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 2), got.y1);
+    try std.testing.expectEqual(@as(u32, 79), got.x2);
+    try std.testing.expectEqual(@as(u32, 7), got.y2);
+    try std.testing.expectEqual(false, got.rect);
+}
+
+test "clampExtent: block in-range passthrough (no clamp)" {
+    const got = clampExtent(.{ .x1 = 3, .y1 = 1, .x2 = 9, .y2 = 5, .rect = true }, 10, 9);
+    try std.testing.expectEqual(@as(u32, 3), got.x1);
+    try std.testing.expectEqual(@as(u32, 1), got.y1);
+    try std.testing.expectEqual(@as(u32, 9), got.x2);
+    try std.testing.expectEqual(@as(u32, 5), got.y2);
+    try std.testing.expectEqual(true, got.rect);
+}
+
+test "clampExtent: x clamp high (x2 beyond grid)" {
+    // x2=99 with cols=10 -> clamped to 9. x1=0 stays 0.
+    const got = clampExtent(.{ .x1 = 0, .y1 = 0, .x2 = 99, .y2 = 0, .rect = false }, 10, 5);
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 9), got.x2); // 99 -> 9
+    try std.testing.expectEqual(@as(u32, 0), got.y1);
+    try std.testing.expectEqual(@as(u32, 0), got.y2);
+}
+
+test "clampExtent: y clamp high (y beyond last_row)" {
+    // y1=50, y2=60 with last_row=23 -> both clamped to 23. x1=x2=0 (in-range, no clamp).
+    const got = clampExtent(.{ .x1 = 0, .y1 = 50, .x2 = 0, .y2 = 60, .rect = false }, 80, 23);
+    try std.testing.expectEqual(@as(u32, 23), got.y1); // 50 -> 23
+    try std.testing.expectEqual(@as(u32, 23), got.y2); // 60 -> 23
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 0), got.x2); // x2=0 in-range (NOT clamped to last_col)
+}
+
+test "clampExtent: cols==0 guard (x collapses to 0, no u32 underflow)" {
+    const got = clampExtent(.{ .x1 = 0, .y1 = 0, .x2 = 0, .y2 = 5, .rect = false }, 0, 5);
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 0), got.x2); // cols==0 -> 0, NOT underflow
+    try std.testing.expectEqual(@as(u32, 0), got.y1);
+    try std.testing.expectEqual(@as(u32, 5), got.y2);
+}
+
+test "clampExtent: order normalization (reversed input) -> min/max re-applied" {
+    // Reversed input {9,7,0,2}: x1=min(9,0)=0, x2=max(9,0)=9, y1=min(7,2)=2, y2=max(7,2)=7.
+    const got = clampExtent(.{ .x1 = 9, .y1 = 7, .x2 = 0, .y2 = 2, .rect = false }, 10, 9);
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 2), got.y1);
+    try std.testing.expectEqual(@as(u32, 9), got.x2);
+    try std.testing.expectEqual(@as(u32, 7), got.y2);
+    try std.testing.expectEqual(false, got.rect);
+}
+
+test "clampExtent: rect=true preserved through clamp" {
+    const got = clampExtent(.{ .x1 = 1, .y1 = 1, .x2 = 99, .y2 = 99, .rect = true }, 10, 5);
+    try std.testing.expectEqual(true, got.rect); // rect survives the clamp
+    try std.testing.expectEqual(@as(u32, 9), got.x2); // x2 clamped
+    try std.testing.expectEqual(@as(u32, 5), got.y2); // y2 clamped
+}
+
+test "clampExtent: last_row==0 (degenerate) -> y collapses to 0" {
+    const got = clampExtent(.{ .x1 = 0, .y1 = 5, .x2 = 0, .y2 = 5, .rect = false }, 10, 0);
+    try std.testing.expectEqual(@as(u32, 0), got.y1); // 5 -> 0
+    try std.testing.expectEqual(@as(u32, 0), got.y2); // 5 -> 0
+    try std.testing.expectEqual(@as(u32, 0), got.x1);
+    try std.testing.expectEqual(@as(u32, 0), got.x2); // x2=0 < last_col=9, no clamp needed
 }
