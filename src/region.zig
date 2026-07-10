@@ -456,9 +456,14 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
             // are tied to ctx.grid; the ScreenFormatter formats it (the SAME block renderGrid uses
             // internally, copied verbatim into renderSelectionHtml). The title is built here (body
             // has runner + target in scope).
-            const title = regionTitle(allocator, runner, target) catch try allocator.dupe(u8, "tmux-2html");
+            // PRD §8.1 / P1.M1.T1.S4: --title (opts.title) overrides the contextual title; else
+            // regionTitle's default. Factored into regionResolveTitle (unit-testable). lang is
+            // resolved ONCE here (static-lifetime slice) and threaded into renderSelectionHtml
+            // (which has no `opts` in scope) so the DocumentOpts literal can carry it.
+            const title = try regionResolveTitle(allocator, opts.title, runner, target);
             defer allocator.free(title);
-            const html = renderSelectionHtml(allocator, &ctx, font, title) catch {
+            const lang = render.resolveLang(opts.lang);
+            const html = renderSelectionHtml(allocator, &ctx, font, title, lang) catch {
                 stderr.writeAll("tmux-2html region: render failed\n") catch {};
                 break :confirm_render 1;
             };
@@ -522,7 +527,7 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
 /// from) => the formatter MUST run against THAT SAME screen. A renderGrid rebuild would build a
 /// different Terminal (its pins would be invalid for this Selection) — that's the alternative
 /// clampExtent+renderGrid path (see design_notes S3), avoided here.
-fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []const u8, title: []const u8) ![]u8 {
+fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []const u8, title: []const u8, lang: []const u8) ![]u8 {
     var aw = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
     defer aw.deinit();
     const gs = render.toGhosttySelection(ctx.sel, ctx.grid, ctx.tty_cols); // infallible; clamps
@@ -540,10 +545,11 @@ fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []co
     try aw.writer.print("{f}", .{f});
     const fragment = aw.writer.buffered(); // the <pre> fragment
 
-    // Wrap the fragment in the §8.1 document envelope (title passed in from body).
+    // Wrap the fragment in the §8.1 document envelope (title + lang passed in from body).
     var dw = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
     defer dw.deinit();
-    try render.writeDocumentBytes(&dw.writer, .{ .title = title, .background = ctx.colors.background }, fragment);
+    // PRD §8.1 / P1.M1.T1.S4: <html lang> threaded in from body() (resolved once via resolveLang).
+    try render.writeDocumentBytes(&dw.writer, .{ .title = title, .lang = lang, .background = ctx.colors.background }, fragment);
     return allocator.dupe(u8, dw.writer.buffered()); // OWNED full-document copy
 }
 
@@ -594,6 +600,20 @@ fn regionTitle(allocator: std.mem.Allocator, runner: capture.Runner, target: []c
     const sess: []const u8 = if (sess_trim.len > 0) sess_trim else "pane";
     const ts = std.time.timestamp(); // Unix seconds (matches the output filename)
     return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, target, ts });
+}
+
+/// Resolve the PRD §8.1 document title for a region (S4): `--title` (opts.title) OVERRIDE wins
+/// verbatim; else the contextual default (regionTitle); else the literal "tmux-2html". Caller
+/// owns + must free. Runner-seamed (delegates to regionTitle's injectable runner) =>
+/// unit-testable via the existing OptFake harness (mirrors the regionTitle tests). P1.M1.T1.S4.
+fn regionResolveTitle(
+    allocator: std.mem.Allocator,
+    override: ?[]const u8,
+    runner: capture.Runner,
+    target: []const u8,
+) ![]u8 {
+    if (override) |t| return allocator.dupe(u8, t);
+    return regionTitle(allocator, runner, target) catch try allocator.dupe(u8, "tmux-2html");
 }
 
 /// region's OWN executable dir (where `.last-output` is written). Uses /proc/self/exe
@@ -1030,6 +1050,32 @@ test "regionTitle: empty session falls back to 'pane'" {
     const title = try regionTitle(alloc, runner, "%5");
     defer alloc.free(title);
     try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
+}
+
+test "regionResolveTitle: --title override wins verbatim (no tmux query)" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "mysess"); // would echo #{session_name} — but override wins
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const title = try regionResolveTitle(alloc, "Region Override", runner, "%7");
+    defer alloc.free(title);
+    // Override is returned VERBATIM; the contextual regionTitle is NOT consulted.
+    try testing.expectEqualStrings("Region Override", title);
+}
+
+test "regionResolveTitle: null override => contextual default" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "mysess");
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const title = try regionResolveTitle(alloc, null, runner, "%7");
+    defer alloc.free(title);
+    // Delegates to regionTitle => PRD §8.1 default form 'tmux-2html — <session>/<pane> <unixtime>'.
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
+    const ts_s = title["tmux-2html — mysess/%7 ".len..];
+    _ = try std.fmt.parseInt(i64, ts_s, 10);
 }
 
 test "selfBinDir: returns a non-empty dir (the test binary's dir)" {

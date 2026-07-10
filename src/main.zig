@@ -328,6 +328,21 @@ fn paneTitle(allocator: std.mem.Allocator, runner: capture.Runner, pane: []const
     return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, pane, ts });
 }
 
+/// Resolve the PRD §8.1 document title for a pane (S4): `--title` (opts.title) OVERRIDE wins
+/// verbatim; else the contextual default (paneTitle: 'tmux-2html — <sess>/<pane> <ts>'); else
+/// the literal "tmux-2html" if the contextual query/alloc fails. Caller owns + must free the
+/// returned slice. Runner-seamed (delegates to paneTitle's injectable runner) => unit-testable
+/// via the existing PaneFake harness (mirrors the paneTitle tests below). P1.M1.T1.S4.
+fn paneResolveTitle(
+    allocator: std.mem.Allocator,
+    override: ?[]const u8,
+    runner: capture.Runner,
+    pane: []const u8,
+) ![]u8 {
+    if (override) |t| return allocator.dupe(u8, t);
+    return paneTitle(allocator, runner, pane) catch try allocator.dupe(u8, "tmux-2html");
+}
+
 /// Build a failure PaneResult (allocator-owned summary). The caller still must free the result's
 /// owned fields via freePaneResult; this helper allocates empty placeholders for the others so
 /// freePaneResult is always safe.
@@ -460,7 +475,9 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
     // emits the COMPLETE §8.1 HTML document (envelope + fragment). Palette from CACHE
     // (no /dev/tty under run-shell). Title = the PRD §8.1 default form for pane.
     const colors = palette.resolve(allocator, .cached, palette.hasControllingTty()); // INFALLIBLE
-    const title = paneTitle(allocator, runner, target) catch try allocator.dupe(u8, "tmux-2html");
+    // PRD §8.1 / P1.M1.T1.S4: --title (opts.title) overrides the contextual title; else
+    // paneTitle's default. Factored into paneResolveTitle so the override is unit-testable.
+    const title = try paneResolveTitle(allocator, opts.title, runner, target);
     defer allocator.free(title);
     render_mod.renderToFileAtomic(
         allocator,
@@ -469,7 +486,8 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
         .{ .cols = result.cols, .rows = result.rows },
         colors,
         opts.font,
-        .{ .title = title, .background = colors.background },
+        // PRD §8.1 / P1.M1.T1.S4: <html lang> = explicit --lang (normalized), else locale, else "en".
+        .{ .title = title, .lang = render_mod.resolveLang(opts.lang), .background = colors.background },
     ) catch {
         try stdout.writeAll("error: cannot write output file\n");
         return 1;
@@ -869,4 +887,28 @@ test "paneTitle: empty session falls back to 'pane'" {
     const title = try paneTitle(alloc, runner, "%5");
     defer alloc.free(title);
     try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
+}
+
+test "paneResolveTitle: --title override wins verbatim (no tmux query)" {
+    const alloc = std.testing.allocator;
+    var fake = PaneFake{ .session = "mysess" }; // would echo #{session_name} — but override wins
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+
+    const title = try paneResolveTitle(alloc, "My Override", runner, "%7");
+    defer alloc.free(title);
+    // Override is returned VERBATIM; the contextual paneTitle is NOT consulted.
+    try std.testing.expectEqualStrings("My Override", title);
+}
+
+test "paneResolveTitle: null override => contextual default" {
+    const alloc = std.testing.allocator;
+    var fake = PaneFake{ .session = "mysess" };
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+
+    const title = try paneResolveTitle(alloc, null, runner, "%7");
+    defer alloc.free(title);
+    // Delegates to paneTitle => PRD §8.1 default form 'tmux-2html — <session>/<pane> <unixtime>'.
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
+    const ts_s = title["tmux-2html — mysess/%7 ".len..];
+    _ = try std.fmt.parseInt(i64, ts_s, 10);
 }
