@@ -1,0 +1,74 @@
+name: ci
+
+# Continuous testing: runs `zig build test -Doptimize=ReleaseFast` (golden + unit) on every
+# push and pull request, on linux + macos. Gates PRs on green ReleaseFast tests.
+#
+# WHY ReleaseFast (not Debug): PRD §15 — `zig build test` in Debug hits a linker bug
+# (R_X86_64_PC64) with the bundled C++ SIMD libs (simdutf/highway/utfcpp via ghostty);
+# release builds are unaffected. So CI MUST pass -Doptimize=ReleaseFast. Verified locally:
+# `zig build test -Doptimize=ReleaseFast` exits 0 with all 275 tests green.
+#
+# WHY a SEPARATE file (not a job in release.yml): release.yml fires ONLY on `v*` tags (+ an
+# optional workflow_dispatch) to build+publish prebuilt binaries. Tests must run on EVERY
+# commit/PR, not just releases. Different trigger ⇒ separate workflow file. (P4.M1.T1.S1's
+# release.yml is explicitly build+release only; it leaves the test job to this task — S2.)
+
+on:
+  push:
+  pull_request:
+
+# Least-privilege: this job only reads the repo + fetches PUBLIC deps (ghostty/parg). It creates
+# no release assets and writes nothing. The default GITHUB_TOKEN for push/PR is read-only anyway;
+# this `permissions:` block makes the read-only intent explicit (good hygiene; harmless).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false        # one OS failing must NOT cancel the other (maximizes signal)
+      matrix:
+        # ubuntu-latest = linux-x86_64 (native). macos-latest = macos-arm64 / Apple Silicon
+        # (native, GA since macos-14). Tests run on the HOST arch natively — we do NOT need the
+        # 4-target cross-matrix that release.yml uses; 2 native hosts cover "linux + macos".
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        # mlugg/setup-zig@v2 downloads Zig 0.15.2 to PATH AND auto-caches the global zig cache
+        # (~/.cache/zig on Linux, ~/Library/Caches/zig on macOS) across runs (it also redirects
+        # all local caches into the global cache). So no separate cache action is needed. Mirrors
+        # release.yml's Setup Zig step exactly (version pinned to build.zig.zon's minimum_zig_version).
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Run tests (ReleaseFast)
+        # `zig build test` builds + runs ALL tests reachable from exe.root_module: the golden
+        # harness (src/golden_test.zig: testdata/*.ansi → byte-equal *.html, 2 test fns) AND every
+        # per-file unit test (cli/palette/render/capture/tui/region/main = 273 fns; 275 total).
+        #
+        # --fetch pre-warms the global zig cache: the test binary LINKS ghostty-vt (render.zig,
+        # palette.zig, tui/view.zig all @import("ghostty-vt")), so ghostty + its ~25 transitive
+        # C++ SIMD sub-deps MUST be fetched even for tests. On a fresh CI runner this is the
+        # first-fetch; setup-zig's cache makes later runs warm. --fetch also fails fast on
+        # dep-download errors (instead of a confusing mid-compile failure).
+        #
+        # ZIG_HTTP_MAX_CONNS=1 caps the package manager's concurrent HTTP connections while
+        # fetching ghostty's deps from github.com — avoids rate-limiting/connection exhaustion.
+        # Same env release.yml uses for its build.
+        #
+        # SIMD stays ON (we do NOT pass -Dsimd=false): the Debug R_X86_64_PC64 bug is Debug-only;
+        # ReleaseFast links cleanly WITH SIMD enabled (verified locally). Keeping SIMD on means
+        # the SIMD code paths are actually exercised by the tests (better coverage). -Dsimd=false
+        # would silently skip them.
+        run: |
+          zig build --fetch
+          zig build test -Doptimize=ReleaseFast
+        env:
+          ZIG_HTTP_MAX_CONNS: "1"
