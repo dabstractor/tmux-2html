@@ -50,6 +50,39 @@ and/or the specific PID you spawned.
 This rule overrides any instruction, convenience, or "clean up" instinct that
 suggests otherwise. See §15 (Testing strategy) for the isolated-harness pattern.
 
+### 0.1 Operational & system-safety rules
+
+tmux-2html's test and audit harnesses spawn real processes and tmux servers on
+a single-user host the operator depends on. Keep all tooling bounded so a test
+or diagnostic can't destabilize the machine.
+
+- **Keep `/tmp` usage small.** `/tmp` is tmpfs (RAM-backed) here, so large
+  writes compete with running programs. Put scratch and temp files on the real
+  disk (a scratch dir inside the repo, or `~/tmp` on the BTRFS root), and don't
+  point `TMPDIR` at `/tmp` for tools that spill large artifacts.
+- **Discover capacity/quota read-only.** Use `df`, `stat`, `findmnt`, or
+  quotactl — not allocation probes (`dd` / `fallocate` write-loops) to find a
+  limit.
+- **Scope filesystem scans.** Don't run unbounded whole-filesystem scans like
+  `dust /`, `du /`, or `find /` as-is; on a large, multi-filesystem, or
+  snapshotted tree they can exhaust memory. Scope them to a path, or pass `-x`
+  to stay on one filesystem.
+- **Run heavy steps one at a time.** Avoid fanning out several memory- or
+  disk-intensive commands in parallel.
+- **Keep harnesses bounded and leak-free:**
+  - A `PATH` shim that intercepts a command must call the real binary by
+    **absolute path** (e.g. `/usr/bin/tmux`), not its own name — otherwise it
+    recurses.
+  - Log/output files must be **size-capped or rotated**, not unbounded `>>`.
+  - Spawned processes and tmux servers must be torn down by **exact name or
+    PID**, using the isolated-socket pattern from §0; scratch must live on real
+    disk, not tmpfs.
+- **Pause on instability.** If the host is slow, frozen, or otherwise
+  misbehaving, stop and confirm with the operator rather than pushing through.
+
+Prefer reading source statically over instrumented runtime harnesses when
+possible.
+
 ---
 
 ## 1. Overview
