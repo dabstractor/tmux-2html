@@ -815,7 +815,7 @@
       "type": "Phase",
       "id": "P4",
       "title": "Distribution, Release & Documentation",
-      "status": "Researching",
+      "status": "Complete",
       "description": "Ship the CI release pipeline (PRD §11) producing the 4-platform prebuilts + SHA256SUMS that the installer downloads, and sync all changeset-level documentation (README, overview). Depends on every implementing subtask.",
       "milestones": [
         {
@@ -871,14 +871,14 @@
           "type": "Milestone",
           "id": "P4.M2",
           "title": "Sync Changeset-Level Documentation",
-          "status": "Researching",
+          "status": "Complete",
           "description": "FINAL task (§5 Mode B): the catch-all that prevents shipping a coherent feature with a stale README. Creates README.md and any whole-feature overview docs that only make sense once the full changeset is in place. Depends on every implementing subtask.",
           "tasks": [
             {
               "type": "Task",
               "id": "P4.M2.T1",
               "title": "README.md + top-level overview docs",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Write the user-facing README (install via TPM, capture modes, keybinds, options summary, known limitations) and ensure docs/ overview sections reflect the complete delta.",
               "subtasks": [
                 {
@@ -916,7 +916,7 @@
                   "type": "Subtask",
                   "id": "P4.M2.T1.S2",
                   "title": "docs/ overview sweep: known limitations, sync-palette, region usage",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P4.M2.T1.S1",
