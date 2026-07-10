@@ -726,7 +726,13 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
     const size = Size{ .cols = cols, .rows = rows };
 
     const stderr = std.fs.File.stderr();
-    const doc = DocumentOpts{ .title = "tmux-2html", .background = colors.background };
+    // PRD §8.1: --title/--lang (S1) resolved here (S2's resolveLang). All four output arms
+    // (--output/--open/stdout/--selection) reuse this `doc`, so resolving once propagates to all.
+    // title: explicit --title, else "tmux-2html". lang: explicit --lang/normalize, else locale, else "en".
+    // resolveLang returns a slice into module-level bcp47_buf (or "en"); both static — no free.
+    const title = opts.title orelse "tmux-2html";
+    const lang = resolveLang(opts.lang);
+    const doc = DocumentOpts{ .title = title, .lang = lang, .background = colors.background };
     if (opts.selection) |coords| {
         // S1 (P1.M4.T1.S1): --selection renders only the inclusive sub-grid (PRD §5.1/§7.4).
         // Render to a buffer so we can (a) detect an empty/zero-cell selection (PRD §13 => no

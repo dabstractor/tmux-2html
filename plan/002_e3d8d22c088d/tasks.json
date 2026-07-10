@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "--title / --lang CLI flags, locale lang resolution, and binary plumbing",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Add the §8.1 title/lang override surface to the binary subcommands (render/pane/region) and a pure locale→BCP-47 lang resolver. DocumentOpts already has `title` and `lang` (default 'en') fields — this task only adds the CLI entry points and the resolver, then wires them into the DocumentOpts that each subcommand already builds. Default behavior MUST be unchanged when no flag/locale is present (render title 'tmux-2html', lang 'en').",
               "subtasks": [
                 {
@@ -54,7 +54,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S3",
                   "title": "render.run wires resolved title + lang into DocumentOpts",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 0.5,
                   "dependencies": [
                     "P1.M1.T1.S1",
@@ -70,7 +70,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S4",
                   "title": "pane (main.zig) and region (region.zig) honor --title override + --lang",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
