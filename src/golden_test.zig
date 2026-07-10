@@ -19,13 +19,14 @@ test "golden: testdata/*.ansi renders byte-equal to testdata/*.html" {
     inline for (td.fixtures) |fx| {
         var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 1 << 16);
         defer aw.deinit();
-        try render.renderGrid(
+        try render.renderDocument(
             std.testing.allocator,
             fx.ansi,
             .{ .cols = 120, .rows = 150 },
             palette.defaultColors(),
             null, // sel: whole grid. (P1.M4.T2.S2 owns selection sub-rectangle goldens.)
             null, // font: null => formatter defaults "monospace" (matches the no---font bless cmd).
+            .{ .title = "tmux-2html", .background = palette.defaultColors().background }, // §8.1 envelope
             &aw.writer,
         );
         const got = aw.writer.buffered();
@@ -53,13 +54,14 @@ test "golden: --selection fixtures render byte-equal (linewise + block)" {
     inline for (td.sel_fixtures) |fx| {
         var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 1 << 16);
         defer aw.deinit();
-        try render.renderGrid(
+        try render.renderDocument(
             std.testing.allocator,
             fx.ansi,
             .{ .cols = fx.cols, .rows = fx.rows },
             palette.defaultColors(),
             .{ .x1 = fx.x1, .y1 = fx.y1, .x2 = fx.x2, .y2 = fx.y2, .rect = fx.rect }, // -> ?cli.SelectionCoords
             null, // font: null => formatter defaults "monospace" (matches the no---font bless cmd)
+            .{ .title = "tmux-2html", .background = palette.defaultColors().background }, // §8.1 envelope
             &aw.writer,
         );
         const got = aw.writer.buffered();

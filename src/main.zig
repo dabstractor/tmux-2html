@@ -313,6 +313,21 @@ fn currentPid() i32 {
     return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
 }
 
+/// Build the PRD §8.1 default document title for a pane: `tmux-2html — <session>/<pane> <unixtime>`.
+/// `pane` is the resolved target pane id (e.g. "%5"); the session name is queried via tmux. On a
+/// session-name query failure the session falls back to "pane". Caller owns the returned slice.
+/// The timestamp is the Unix seconds (wall-clock, matching the output filename); it disambiguates
+/// captures and is always available (no calendar-math dependency).
+fn paneTitle(allocator: std.mem.Allocator, runner: capture.Runner, pane: []const u8) ![]u8 {
+    const session = capture.querySessionName(runner, allocator, pane) catch
+        try allocator.alloc(u8, 0);
+    defer allocator.free(session);
+    const sess_trim = std.mem.trim(u8, session, " \t\n\r");
+    const sess: []const u8 = if (sess_trim.len > 0) sess_trim else "pane";
+    const ts = std.time.timestamp(); // Unix seconds (matches the output filename)
+    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, pane, ts });
+}
+
 /// Build a failure PaneResult (allocator-owned summary). The caller still must free the result's
 /// owned fields via freePaneResult; this helper allocates empty placeholders for the others so
 /// freePaneResult is always safe.
@@ -441,9 +456,12 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
         return result.code;
     }
 
-    // Render the WHOLE grid to the output path (atomic temp+rename). renderToFileAtomic calls
-    // renderGrid(sel:null) internally. Palette from CACHE (no /dev/tty under run-shell).
+    // Render the WHOLE grid to the output path (atomic temp+rename). renderToFileAtomic
+    // emits the COMPLETE §8.1 HTML document (envelope + fragment). Palette from CACHE
+    // (no /dev/tty under run-shell). Title = the PRD §8.1 default form for pane.
     const colors = palette.resolve(allocator, .cached, palette.hasControllingTty()); // INFALLIBLE
+    const title = paneTitle(allocator, runner, target) catch try allocator.dupe(u8, "tmux-2html");
+    defer allocator.free(title);
     render_mod.renderToFileAtomic(
         allocator,
         result.output_path,
@@ -451,6 +469,7 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
         .{ .cols = result.cols, .rows = result.rows },
         colors,
         opts.font,
+        .{ .title = title, .background = colors.background },
     ) catch {
         try stdout.writeAll("error: cannot write output file\n");
         return 1;
@@ -827,4 +846,27 @@ test "currentPid: returns a non-negative pid on Linux" {
     } else {
         try std.testing.expectEqual(@as(i32, 0), pid);
     }
+}
+
+test "paneTitle: session + pane + timestamp => 'tmux-2html — <sess>/<pane> <digits>'" {
+    const alloc = std.testing.allocator;
+    var fake = PaneFake{ .session = "mysess" }; // echoes #{session_name}
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+
+    const title = try paneTitle(alloc, runner, "%7");
+    defer alloc.free(title);
+    // PRD §8.1 default form: 'tmux-2html — <session>/<pane> <unixtime>'.
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
+    const ts_s = title["tmux-2html — mysess/%7 ".len..];
+    _ = try std.fmt.parseInt(i64, ts_s, 10);
+}
+
+test "paneTitle: empty session falls back to 'pane'" {
+    const alloc = std.testing.allocator;
+    var fake = PaneFake{ .session = "" }; // empty session_name => falls back to "pane"
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+
+    const title = try paneTitle(alloc, runner, "%5");
+    defer alloc.free(title);
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
 }

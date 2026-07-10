@@ -22,11 +22,13 @@
 set -eu
 
 # ---- config (single sync points) --------------------------------------------
-# GitHub repo path segment. CRITICAL: the published repo is `dabstractor/tmux-ansi2html`
-# while EVERYTHING inside the repo uses `tmux-2html` (binary, --version, options,
-# release asset prefix). Hardcoding `tmux-2html` here would 404 EVERY fetch.
-# Override via env for forks/mirrors. Bump together with the real published repo.
-REPO=${TMUX_2HTML_REPO:-dabstractor/tmux-ansi2html}
+# GitHub repo path segment. The published repo is `tmux-2html/tmux-2html` (the same org/name
+# the README's TPM install line uses: set -g @plugin 'tmux-2html/tmux-2html'). The binary,
+# --version, options, and release asset prefix all use `tmux-2html`; the repo org/name is the
+# ONE place the GitHub release URL must point at. Keep this in sync with README.md's @plugin
+# line and .github/workflows/release.yml (which uploads to whichever repo tags `v*`).
+# Override via env for forks/mirrors.
+REPO=${TMUX_2HTML_REPO:-tmux-2html/tmux-2html}
 # Release download base. Default = the latest-published-release shortcut (GitHub
 # 302-redirects to the asset blob). For tests, set TMUX_2HTML_DL_BASE=file://$dir to
 # fetch a staged fixture dir with ZERO network (curl supports file://). NOTE: `latest`

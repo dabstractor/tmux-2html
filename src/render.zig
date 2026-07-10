@@ -169,6 +169,126 @@ pub fn renderGrid(
     try out.print("{f}", .{f}); // {f} invokes f.format(*std.Io.Writer)
 }
 
+// ---- PRD §8.1 HTML document envelope (normative: "no cutting corners") ----
+// renderGrid emits ONLY the `<pre class="term2html-output">…</pre>` fragment (the
+// absorbed term2html ScreenFormatter output). PRD §8.1 mandates that EVERY HTML sink
+// (render stdout/--output/--selection, pane --visible/--full, region confirm) write a
+// COMPLETE, valid HTML5 document wrapping that fragment. `writeDocument` is the shared
+// envelope helper: it writes the DOCTYPE → <html> → <head> (charset, viewport, title,
+// a body-margin-reset + page-bg style) → <body> → the rendered <pre> fragment → closing
+// tags, to `out`. `renderDocument` is the full primitive (build the grid, format the
+// fragment INTO the document via a bridge writer). The golden harness (golden_test.zig)
+// calls renderDocument so it pins the FULL document byte-for-byte (PRD §15).
+
+/// Document envelope metadata (PRD §8.1). `title` is HTML-escaped by writeDocument;
+/// `lang` defaults to "en" (configurable via @tmux-2html-lang/locale — future). The
+/// `background` RGB drives the page `<body>` background so the terminal block does not
+/// sit in a white margin (§8.1 normative: page bg = resolved terminal bg).
+pub const DocumentOpts = struct {
+    title: []const u8,
+    lang: []const u8 = "en",
+    background: ?ghostty_vt.color.RGB = null, // page bg = terminal bg (null => no inline bg)
+};
+
+/// HTML-escape `s` into `out` (PRD §8.1: <title> etc. is HTML-escaped; cell text stays
+/// ghostty-vt's job). Escapes & < > " ' per OWASP. PURE (no alloc) => unit-testable.
+fn writeEscaped(out: *std.Io.Writer, s: []const u8) !void {
+    for (s) |c| switch (c) {
+        '&' => try out.writeAll("&amp;"),
+        '<' => try out.writeAll("&lt;"),
+        '>' => try out.writeAll("&gt;"),
+        '"' => try out.writeAll("&quot;"),
+        '\'' => try out.writeAll("&#x27;"),
+        else => try out.writeByte(c),
+    };
+}
+
+/// Write the PRD §8.1 document envelope: DOCTYPE, <html lang>, <head> (charset FIRST,
+/// viewport, escaped <title>, a body-margin-reset + page-bg style), <body>, then call
+/// `fragment_fn` to emit the `<pre>` fragment, then `</body></html>`. The fragment is
+/// emitted INLINE via the callback so no intermediate buffer is needed for the whole-grid
+/// path (memory-efficient for large panes). charset is the FIRST element in <head> (HTML
+/// spec: within the first 1024 bytes). The body background matches the resolved terminal
+/// bg (§6) so the terminal block does not sit in a white margin; default body margin is 0.
+///
+/// `fragment_fn` is a COMPTIME function pointer (so it can be a bound method on a context
+/// struct); `ctx` is passed back to it opaquely. This avoids a one-shot allocation for the
+/// whole-grid streaming path while letting the buffered path splice in pre-rendered bytes.
+pub fn writeDocument(
+    out: *std.Io.Writer,
+    doc: DocumentOpts,
+    comptime Ctx: type,
+    ctx: Ctx,
+    comptime fragment_fn: *const fn (Ctx, *std.Io.Writer) anyerror!void,
+) !void {
+    try out.writeAll("<!DOCTYPE html>\n<html lang=\"");
+    try writeEscaped(out, doc.lang);
+    try out.writeAll("\">\n<head>\n<meta charset=\"utf-8\">\n");
+    try out.writeAll("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+    try out.writeAll("<title>");
+    try writeEscaped(out, doc.title);
+    try out.writeAll("</title>\n<style>");
+    try out.writeAll("html,body{margin:0;padding:0;}");
+    if (doc.background) |bg| {
+        try out.print("body{{background-color:#{x:0>2}{x:0>2}{x:0>2};}}", .{ bg.r, bg.g, bg.b });
+    }
+    try out.writeAll("</style>\n</head>\n<body>\n");
+    try fragment_fn(ctx, out); // the <pre> fragment (renderGrid against the SAME writer)
+    try out.writeAll("\n</body>\n</html>\n");
+}
+
+/// Write a COMPLETE HTML5 document (PRD §8.1) wrapping an ALREADY-RENDERED `<pre>` fragment
+/// (`fragment_bytes`) to `out`. Used by the `--selection` and region-confirm paths, which
+/// buffer the fragment to validate non-emptiness BEFORE writing. The whole-grid paths use
+/// `writeDocument` (streaming, no intermediate buffer). Identical envelope; the fragment is
+/// spliced in as a raw `writeAll` (it is already-correct HTML from the formatter).
+pub fn writeDocumentBytes(
+    out: *std.Io.Writer,
+    doc: DocumentOpts,
+    fragment_bytes: []const u8,
+) !void {
+    const Ctx = struct {
+        fb: []const u8,
+        fn emit(self: @This(), w: *std.Io.Writer) anyerror!void {
+            try w.writeAll(self.fb);
+        }
+    };
+    const ctx = Ctx{ .fb = fragment_bytes };
+    try writeDocument(out, doc, Ctx, ctx, Ctx.emit);
+}
+
+/// The full-document rendering primitive (PRD §8.1): build the grid, then emit the
+/// complete HTML5 document (envelope + `<pre>` fragment) to `out`. This is what EVERY
+/// output sink calls. `doc` carries the title/lang/background (background defaults to
+/// colors.background when the caller passes .background = colors.background). The
+/// fragment is rendered directly into the document's writer via a closure-free callback
+/// (renderGridFragment below) — no intermediate buffer for the whole-grid path.
+pub fn renderDocument(
+    alloc: std.mem.Allocator,
+    ansi: []const u8,
+    size: Size,
+    colors: palette.Colors,
+    sel: ?cli.SelectionCoords,
+    font: ?[]const u8,
+    doc: DocumentOpts,
+    out: *std.Io.Writer,
+) !void {
+    // Capture the render params so the fragment callback can invoke renderGrid.
+    const Ctx = struct {
+        a: std.mem.Allocator,
+        an: []const u8,
+        sz: Size,
+        cl: palette.Colors,
+        sl: ?cli.SelectionCoords,
+        fnt: ?[]const u8,
+        fn render(self: @This(), w: *std.Io.Writer) anyerror!void {
+            try renderGrid(self.a, self.an, self.sz, self.cl, self.sl, self.fnt, w);
+        }
+    };
+    const ctx = Ctx{ .a = alloc, .an = ansi, .sz = size, .cl = colors, .sl = sel, .fnt = font };
+    try writeDocument(out, doc, Ctx, ctx, Ctx.render);
+}
+
 /// Build a ghostty `Selection` from CLI coordinates against a loaded screen (PRD §5.1/§7.4).
 /// Reusable: `renderGrid` calls this internally; the TUI (P3.M2.T2.S2) calls it directly.
 ///
@@ -295,7 +415,10 @@ fn wholeGridSelection(screen: *const Screen) Selection {
     return Selection.init(tl, br, false); // untracked; no deinit (see toGhosttySelection)
 }
 
-/// Render `ansi` to HTML and write it to `path` ATOMICALLY (P1.M3.T1.S2; research/findings.md §4).
+/// Render `ansi` to a COMPLETE HTML5 document (PRD §8.1) and write it to `path` ATOMICALLY
+/// (P1.M3.T1.S2; research/findings.md §4). Wraps the vendored fragment in the document
+/// envelope via `renderDocument`. `doc` carries the title/lang/page-bg (the pane/region callers
+/// pass a contextual title + colors.background; render.run passes "tmux-2html").
 ///
 /// Mirrors palette.writeCacheDir's proven atomic idiom: create a temp file IN THE SAME
 /// DIRECTORY as the target (same filesystem => `rename` is atomic, no EXDEV), write, best-
@@ -306,7 +429,7 @@ fn wholeGridSelection(screen: *const Screen) Selection {
 /// a REAL closeable dir handle. For absolute dirnames use `openDirAbsolute`.
 ///
 /// The temp file's `*std.Io.Writer` is the SAME bridge S1 validated for stdout +
-/// Writer.Allocating (`var fw = f.writer(&buf); renderGrid(…, &fw.interface)`). No
+/// Writer.Allocating (`var fw = f.writer(&buf); renderDocument(…, &fw.interface)`). No
 /// intermediate buffer => memory-efficient for large panes.
 pub fn renderToFileAtomic(
     alloc: std.mem.Allocator,
@@ -315,6 +438,7 @@ pub fn renderToFileAtomic(
     size: Size,
     colors: palette.Colors,
     font: ?[]const u8,
+    doc: DocumentOpts,
 ) !void {
     const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
     const base = std.fs.path.basename(path);
@@ -342,7 +466,7 @@ pub fn renderToFileAtomic(
     // The S1-validated writer bridge (works for ANY File, not just stdout).
     var buf: [8192]u8 = undefined;
     var fw = f.writer(&buf);
-    try renderGrid(alloc, ansi, size, colors, null, font, &fw.interface); // sel: null (S4)
+    try renderDocument(alloc, ansi, size, colors, null, font, doc, &fw.interface); // §8.1 envelope; sel: null (S4)
     try fw.interface.flush();
     f.sync() catch {}; // best-effort durability before rename
     f.close();
@@ -365,6 +489,40 @@ fn selectionBodyEmpty(html: []const u8) bool {
     const body = html[open_end + 1 .. close];
     for (body) |c| if (!std.ascii.isWhitespace(c)) return false;
     return true;
+}
+
+/// Write a COMPLETE HTML5 document (PRD §8.1) wrapping a pre-rendered `<pre>` fragment
+/// (`fragment_bytes`) to `path` ATOMICALLY (temp + rename in the same dir). Used by the
+/// `--selection` path, which buffers the fragment to validate non-emptiness before writing.
+/// Mirrors `renderToFileAtomic`'s atomic idiom but for already-rendered fragment bytes.
+fn writeDocFileAtomic(alloc: std.mem.Allocator, path: []const u8, doc: DocumentOpts, fragment_bytes: []const u8) !void {
+    const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
+    const base = std.fs.path.basename(path);
+
+    var rnd: [4]u8 = undefined;
+    std.crypto.random.bytes(&rnd);
+    const tmp_name = try std.fmt.allocPrint(alloc, ".{s}.{x}.tmp", .{ base, @as(u32, @bitCast(rnd)) });
+    defer alloc.free(tmp_name);
+
+    var dir = if (std.fs.path.isAbsolute(dir_path))
+        try std.fs.openDirAbsolute(dir_path, .{})
+    else
+        try std.fs.cwd().openDir(dir_path, .{});
+    defer dir.close();
+
+    var f = try dir.createFile(tmp_name, .{});
+    errdefer {
+        f.close();
+        dir.deleteFile(tmp_name) catch {};
+    }
+    var buf: [8192]u8 = undefined;
+    var fw = f.writer(&buf);
+    try writeDocumentBytes(&fw.interface, doc, fragment_bytes);
+    try fw.interface.flush();
+    f.sync() catch {}; // best-effort durability before rename
+    f.close();
+
+    try dir.rename(tmp_name, base); // same dir => atomic
 }
 
 /// Write pre-rendered `bytes` to `path` ATOMICALLY (temp + rename in the same dir). Used by
@@ -475,6 +633,7 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
     const size = Size{ .cols = cols, .rows = rows };
 
     const stderr = std.fs.File.stderr();
+    const doc = DocumentOpts{ .title = "tmux-2html", .background = colors.background };
     if (opts.selection) |coords| {
         // S1 (P1.M4.T1.S1): --selection renders only the inclusive sub-grid (PRD §5.1/§7.4).
         // Render to a buffer so we can (a) detect an empty/zero-cell selection (PRD §13 => no
@@ -501,7 +660,7 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
             return 1;
         }
         if (opts.output) |path| {
-            writeFileAtomic(alloc, path, html) catch {
+            writeDocFileAtomic(alloc, path, doc, html) catch {
                 stderr.writeAll("tmux-2html render: cannot write output file\n") catch {};
                 return 1;
             };
@@ -512,13 +671,21 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
                 return 1;
             };
             defer alloc.free(tmp);
-            writeFileAtomic(alloc, tmp, html) catch {
+            writeDocFileAtomic(alloc, tmp, doc, html) catch {
                 stderr.writeAll("tmux-2html render: cannot write temp file\n") catch {};
                 return 1;
             };
             spawnXdgOpen(tmp, alloc);
         } else {
-            std.fs.File.stdout().writeAll(html) catch {
+            // stdout: wrap the fragment in the §8.1 document and write it.
+            var out_file = std.fs.File.stdout();
+            var sbuf: [4096]u8 = undefined;
+            var fw = out_file.writer(&sbuf);
+            writeDocumentBytes(&fw.interface, doc, html) catch {
+                stderr.writeAll("tmux-2html render: write failed\n") catch {};
+                return 1;
+            };
+            fw.interface.flush() catch {
                 stderr.writeAll("tmux-2html render: write failed\n") catch {};
                 return 1;
             };
@@ -527,7 +694,7 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
     }
     if (opts.output) |path| {
         // --output: write the file ATOMICALLY (temp + rename in the same dir).
-        renderToFileAtomic(alloc, path, ansi, size, colors, opts.font) catch {
+        renderToFileAtomic(alloc, path, ansi, size, colors, opts.font, doc) catch {
             stderr.writeAll("tmux-2html render: cannot write output file\n") catch {};
             return 1;
         };
@@ -539,21 +706,18 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
             return 1;
         };
         defer alloc.free(tmp);
-        renderToFileAtomic(alloc, tmp, ansi, size, colors, opts.font) catch {
+        renderToFileAtomic(alloc, tmp, ansi, size, colors, opts.font, doc) catch {
             stderr.writeAll("tmux-2html render: cannot write temp file\n") catch {};
             return 1;
         };
         spawnXdgOpen(tmp, alloc);
     } else {
-        // stdout — S1's path, verbatim (no regression).
-        // NEW-IO writer bridge (research/findings.md §3, compile-validated):
-        // `out_file.writer(&buf)` returns an `fs.File.Writer` WRAPPER whose `.interface` field IS
-        // the `std.Io.Writer` the formatter wants. Pass `&fw.interface`, flush `fw.interface`.
+        // stdout: emit the COMPLETE §8.1 document (envelope + fragment).
         var out_file = std.fs.File.stdout();
         var sbuf: [4096]u8 = undefined;
         var fw = out_file.writer(&sbuf);
         defer fw.interface.flush() catch {};
-        renderGrid(alloc, ansi, size, colors, null, opts.font, &fw.interface) catch {
+        renderDocument(alloc, ansi, size, colors, null, opts.font, doc, &fw.interface) catch {
             stderr.writeAll("tmux-2html render: write failed\n") catch {};
             return 1;
         };
@@ -694,11 +858,18 @@ test "renderGrid: red foreground emits styled span" {
     defer falloc.free(fdir_abs);
     const fabs = try std.fmt.allocPrint(falloc, "{s}/out.html", .{fdir_abs});
     defer falloc.free(fabs);
-    try renderToFileAtomic(falloc, fabs, "\x1b[31mred\x1b[0m", .{ .cols = 40, .rows = 5 }, palette.defaultColors(), "Fira Code");
+    try renderToFileAtomic(falloc, fabs, "\x1b[31mred\x1b[0m", .{ .cols = 40, .rows = 5 }, palette.defaultColors(), "Fira Code", .{ .title = "tmux-2html", .background = palette.defaultColors().background });
     var ff = try ftmp.dir.openFile("out.html", .{});
     defer ff.close();
     const fhtml = try ff.readToEndAlloc(falloc, 1 << 20);
     defer falloc.free(fhtml);
+    // §8.1 envelope: the file is a COMPLETE document, not a bare fragment.
+    try std.testing.expect(std.mem.startsWith(u8, fhtml, "<!DOCTYPE html>"));
+    try std.testing.expect(std.mem.indexOf(u8, fhtml, "<html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fhtml, "<meta charset=\"utf-8\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fhtml, "<title>tmux-2html</title>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fhtml, "<body>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fhtml, "</html>") != null);
     try std.testing.expect(std.mem.indexOf(u8, fhtml, "<pre") != null);
     try std.testing.expect(std.mem.indexOf(u8, fhtml, ">red</span>") != null);
     try std.testing.expect(std.mem.indexOf(u8, fhtml, "font-family: Fira Code") != null);
@@ -1022,6 +1193,76 @@ test "writeFileAtomic: writes target, leaves no .tmp" {
     // guarantee is structural (rename is the last step; errdefer deletes the temp on any error)
     // and is proven end-to-end by the Level-3 integration check.
     _ = try tmp.dir.statFile("out.html");
+}
+
+// ---- §8.1 HTML document envelope unit tests (PURE/IO-only -> separate test fns) ----
+// writeEscaped/writeDocument/writeDocumentBytes do NOT touch ghostty-vt Terminal => they are
+// safe as separate test fns (the cross-test GOTCHA only affects Terminal.init scopes). They
+// verify the PRD §8.1 normative requirements: DOCTYPE first, charset first in <head>, viewport,
+// escaped <title>, <body> wrapping the fragment, page bg from the resolved terminal background.
+
+test "writeEscaped: escapes & < > \" ' and passes through safe bytes" {
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 256);
+    defer aw.deinit();
+    try writeEscaped(&aw.writer, "a<b>&\"'\xc2\xa3"); // \xc2\xa3 = £ (safe UTF-8 byte pair)
+    try std.testing.expectEqualStrings("a&lt;b&gt;&amp;&quot;&#x27;\xc2\xa3", aw.writer.buffered());
+}
+
+test "writeDocument: full §8.1 envelope (DOCTYPE first, charset first in head, title escaped)" {
+    // Fragment callback that emits a canned <pre> (no Terminal => no cross-test GOTCHA).
+    const Ctx = struct {
+        fn emit(_: @This(), w: *std.Io.Writer) anyerror!void {
+            try w.writeAll("<pre>FRAGMENT</pre>");
+        }
+    };
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 1024);
+    defer aw.deinit();
+    try writeDocument(&aw.writer, .{
+        .title = "a<b>&c",
+        .background = .{ .r = 41, .g = 44, .b = 51 },
+    }, Ctx, .{}, Ctx.emit);
+    const out = aw.writer.buffered();
+    // DOCTYPE is the FIRST bytes.
+    try std.testing.expect(std.mem.startsWith(u8, out, "<!DOCTYPE html>"));
+    // <html lang> root.
+    try std.testing.expect(std.mem.indexOf(u8, out, "<html lang=\"en\">") != null);
+    // charset is the FIRST element in <head> (appears before viewport/title).
+    const head = std.mem.indexOf(u8, out, "<head>\n").?;
+    const charset = std.mem.indexOf(u8, out, "<meta charset=\"utf-8\">").?;
+    const viewport = std.mem.indexOf(u8, out, "<meta name=\"viewport").?;
+    const title = std.mem.indexOf(u8, out, "<title>").?;
+    try std.testing.expect(head < charset and charset < viewport and charset < title);
+    // title is HTML-escaped.
+    try std.testing.expect(std.mem.indexOf(u8, out, "<title>a&lt;b&gt;&amp;c</title>") != null);
+    // viewport content.
+    try std.testing.expect(std.mem.indexOf(u8, out, "width=device-width, initial-scale=1") != null);
+    // page background = resolved terminal bg (#292c33).
+    try std.testing.expect(std.mem.indexOf(u8, out, "body{background-color:#292c33;}") != null);
+    // <body> wraps the fragment; document ends with </html>.
+    try std.testing.expect(std.mem.indexOf(u8, out, "<body>\n<pre>FRAGMENT</pre>") != null);
+    try std.testing.expect(std.mem.endsWith(u8, out, "</body>\n</html>\n"));
+}
+
+test "writeDocument: null background => no inline body bg style" {
+    const Ctx = struct {
+        fn emit(_: @This(), w: *std.Io.Writer) anyerror!void {
+            try w.writeAll("<pre>X</pre>");
+        }
+    };
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 512);
+    defer aw.deinit();
+    try writeDocument(&aw.writer, .{ .title = "t" }, Ctx, .{}, Ctx.emit);
+    try std.testing.expect(std.mem.indexOf(u8, aw.writer.buffered(), "background-color:#") == null);
+}
+
+test "writeDocumentBytes: wraps a pre-rendered fragment in the full §8.1 document" {
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 512);
+    defer aw.deinit();
+    try writeDocumentBytes(&aw.writer, .{ .title = "tmux-2html" }, "<pre>PRE-RENDERED</pre>");
+    const out = aw.writer.buffered();
+    try std.testing.expect(std.mem.startsWith(u8, out, "<!DOCTYPE html>"));
+    try std.testing.expect(std.mem.indexOf(u8, out, "<pre>PRE-RENDERED</pre>") != null);
+    try std.testing.expect(std.mem.endsWith(u8, out, "</html>\n"));
 }
 
 // ---- P3.M2.T2.S2 PURE unit tests (clampExtent — NO Terminal -> separate test fns, safe) ----

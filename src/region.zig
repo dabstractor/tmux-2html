@@ -454,8 +454,11 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
             // Render the user's selection against the EXISTING grid (no Terminal rebuild).
             // toGhosttySelection (P3.M2.T2.S2, pub) returns a native ghostty Selection whose pins
             // are tied to ctx.grid; the ScreenFormatter formats it (the SAME block renderGrid uses
-            // internally, copied verbatim into renderSelectionHtml).
-            const html = renderSelectionHtml(allocator, &ctx, font) catch {
+            // internally, copied verbatim into renderSelectionHtml). The title is built here (body
+            // has runner + target in scope).
+            const title = regionTitle(allocator, runner, target) catch try allocator.dupe(u8, "tmux-2html");
+            defer allocator.free(title);
+            const html = renderSelectionHtml(allocator, &ctx, font, title) catch {
                 stderr.writeAll("tmux-2html region: render failed\n") catch {};
                 break :confirm_render 1;
             };
@@ -505,19 +508,21 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
 // ALREADY proven in render.zig's single Terminal test scope (P3.M2.T2.S2).
 // ============================================================================
 
-/// Render ctx.sel against the LOADED ctx.grid to an OWNED HTML buffer (caller frees). Uses
-/// `render.toGhosttySelection` (P3.M2.T2.S2, pub, INFALLIBLE — clamps instead of erroring) + the
-/// vendored ScreenFormatter (the SAME block `render.renderGrid` uses internally, copied
-/// verbatim). NOT unit-testable (touches ctx.grid => Terminal => the cross-test GOTCHA); the
-/// selection->HTML fidelity is ALREADY proven in render.zig's single Terminal test scope
-/// (toGhosttySelection + formatSelOnScreen). region.zig is GLUE over it.
+/// Render ctx.sel against the LOADED ctx.grid to an OWNED FULL HTML document (PRD §8.1:
+/// complete document, never a fragment; caller frees). Uses `render.toGhosttySelection`
+/// (P3.M2.T2.S2, pub, INFALLIBLE — clamps instead of erroring) + the vendored ScreenFormatter
+/// (the SAME block `render.renderGrid` uses internally, copied verbatim) to produce the `<pre>`
+/// fragment, then wraps it in the document envelope via `render.writeDocumentBytes`. NOT
+/// unit-testable (touches ctx.grid => Terminal => the cross-test GOTCHA); the selection->HTML
+/// fidelity is ALREADY proven in render.zig's single Terminal test scope (toGhosttySelection +
+/// formatSelOnScreen). region.zig is GLUE over it.
 ///
 /// WHY format ctx.grid (NOT a renderGrid rebuild): toGhosttySelection returns a native
 /// Selection whose pins are tied to ctx.grid (pins are bound to the PageList they were created
 /// from) => the formatter MUST run against THAT SAME screen. A renderGrid rebuild would build a
 /// different Terminal (its pins would be invalid for this Selection) — that's the alternative
 /// clampExtent+renderGrid path (see design_notes S3), avoided here.
-fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []const u8) ![]u8 {
+fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []const u8, title: []const u8) ![]u8 {
     var aw = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
     defer aw.deinit();
     const gs = render.toGhosttySelection(ctx.sel, ctx.grid, ctx.tty_cols); // infallible; clamps
@@ -533,7 +538,13 @@ fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []co
     f.content = .{ .selection = gs }; // null = whole grid; some(gs) = the selection sub-grid
     f.extra = .styles; // per-cell <span> inline CSS + OSC-8 <a> hyperlinks
     try aw.writer.print("{f}", .{f});
-    return allocator.dupe(u8, aw.writer.buffered()); // OWNED copy (mirrors render.renderToOwned)
+    const fragment = aw.writer.buffered(); // the <pre> fragment
+
+    // Wrap the fragment in the §8.1 document envelope (title passed in from body).
+    var dw = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
+    defer dw.deinit();
+    try render.writeDocumentBytes(&dw.writer, .{ .title = title, .background = ctx.colors.background }, fragment);
+    return allocator.dupe(u8, dw.writer.buffered()); // OWNED full-document copy
 }
 
 /// Resolve the output path: explicit `--output FILE` wins; else build the collision-safe
@@ -569,6 +580,20 @@ fn resolveOutputPath(
 /// edit main.zig — S1 owns the main.zig dispatch wiring). PURE => unit-testable.
 fn regionPid() i32 {
     return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+}
+
+/// Build the PRD §8.1 default document title for a region: `tmux-2html — <session>/<pane> <unixtime>`.
+/// Mirrors main.zig's paneTitle (region shares the pane context). The session is queried via tmux
+/// (falls back to "pane" on query failure). Caller owns the returned slice. Runner-seamed =>
+/// unit-testable (mirrors paneTitle's query path).
+fn regionTitle(allocator: std.mem.Allocator, runner: capture.Runner, target: []const u8) ![]u8 {
+    const session = capture.querySessionName(runner, allocator, target) catch
+        try allocator.alloc(u8, 0);
+    defer allocator.free(session);
+    const sess_trim = std.mem.trim(u8, session, " \t\n\r");
+    const sess: []const u8 = if (sess_trim.len > 0) sess_trim else "pane";
+    const ts = std.time.timestamp(); // Unix seconds (matches the output filename)
+    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, target, ts });
 }
 
 /// region's OWN executable dir (where `.last-output` is written). Uses /proc/self/exe
@@ -979,6 +1004,32 @@ test "regionPid: Linux => > 0; else >= 0" {
     } else {
         try testing.expect(pid >= 0); // non-Linux => 0 (regionPid's documented fallback)
     }
+}
+
+test "regionTitle: session + pane + timestamp => 'tmux-2html — <sess>/<pane> <digits>'" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "mysess");
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const title = try regionTitle(alloc, runner, "%7");
+    defer alloc.free(title);
+    // PRD §8.1 default form: 'tmux-2html — <session>/<pane> <unixtime>'.
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
+    // trailing component is the numeric Unix timestamp.
+    const ts_s = title["tmux-2html — mysess/%7 ".len..];
+    _ = try std.fmt.parseInt(i64, ts_s, 10);
+}
+
+test "regionTitle: empty session falls back to 'pane'" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, ""); // empty session_name => falls back to "pane"
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const title = try regionTitle(alloc, runner, "%5");
+    defer alloc.free(title);
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
 }
 
 test "selfBinDir: returns a non-empty dir (the test binary's dir)" {

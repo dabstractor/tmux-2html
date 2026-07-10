@@ -344,7 +344,7 @@ const sync_palette_help =
     \\  --force             re-query even if a cache exists
     \\  --help              show this help
     \\
-    \\Exit codes: 0 success, 1 usage/runtime error.
+    \\Exit codes: 0 success, 1 usage/runtime error, 2 no controlling terminal.
     \\
 ;
 
