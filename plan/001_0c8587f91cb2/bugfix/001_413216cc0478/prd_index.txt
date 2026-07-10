@@ -1,0 +1,14 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: pane subcommand ignores @tmux-2html-open and @tmux-2html-font options (the primary prefix O workflow)
+  h3.1 Issue 2: region confirm-render writes an empty HTML file and returns success (exit 0) for a blank/zero-cell selection
+  h3.2 Issue 3: Mouse support is not implemented in the region TUI (click/drag/wheel do nothing)
+ h2.3 Minor Issues (Nice to Fix)
+  h3.3 Issue 4: Missing --title flag (title is not configurable)
+  h3.4 Issue 5: Missing @tmux-2html-lang / locale configurability for the <html lang> attribute
+  h3.5 Issue 6: pane/region document title format deviates from PRD §8.1
+ h2.4 Testing Summary
+---
+code:2 para:12 list:1

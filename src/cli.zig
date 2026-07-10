@@ -64,6 +64,8 @@ pub const RenderOpts = struct {
     output: ?[]const u8 = null,
     open: bool = false,
     selection: ?SelectionCoords = null,
+    title: ?[]const u8 = null, // PRD §8.1: document <title> (--title; default derived in render.zig)
+    lang: ?[]const u8 = null, // PRD §8.1: <html lang> (--lang; resolved/normalized in render.zig S2)
 };
 
 /// PRD §5.2 `pane`.
@@ -75,6 +77,8 @@ pub const PaneOpts = struct {
     font: []const u8 = "monospace",
     output: ?[]const u8 = null,
     open: bool = false,
+    title: ?[]const u8 = null, // PRD §8.1
+    lang: ?[]const u8 = null, // PRD §8.1
 };
 
 /// PRD §5.3 `region`.
@@ -83,6 +87,8 @@ pub const RegionOpts = struct {
     font: []const u8 = "monospace",
     output: ?[]const u8 = null,
     open: bool = false,
+    title: ?[]const u8 = null, // PRD §8.1
+    lang: ?[]const u8 = null, // PRD §8.1
 };
 
 /// PRD §5.4 `sync-palette`.
@@ -171,6 +177,10 @@ pub fn parseRender(args: []const []const u8) ParseError!RenderOpts {
                     opts.open = true;
                 } else if (flag.isLong("selection")) {
                     opts.selection = try parseSelection(try requireValue(&parser));
+                } else if (flag.isLong("title")) {
+                    opts.title = try requireValue(&parser);
+                } else if (flag.isLong("lang")) {
+                    opts.lang = try requireValue(&parser);
                 } else {
                     return error.UnknownFlag;
                 }
@@ -202,6 +212,10 @@ pub fn parsePane(args: []const []const u8) ParseError!PaneOpts {
                     opts.output = try requireValue(&parser);
                 } else if (flag.isLong("open")) {
                     opts.open = true;
+                } else if (flag.isLong("title")) {
+                    opts.title = try requireValue(&parser);
+                } else if (flag.isLong("lang")) {
+                    opts.lang = try requireValue(&parser);
                 } else {
                     return error.UnknownFlag;
                 }
@@ -228,6 +242,10 @@ pub fn parseRegion(args: []const []const u8) ParseError!RegionOpts {
                     opts.output = try requireValue(&parser);
                 } else if (flag.isLong("open")) {
                     opts.open = true;
+                } else if (flag.isLong("title")) {
+                    opts.title = try requireValue(&parser);
+                } else if (flag.isLong("lang")) {
+                    opts.lang = try requireValue(&parser);
                 } else {
                     return error.UnknownFlag;
                 }
@@ -289,6 +307,8 @@ const render_help =
     \\  --cols N            virtual terminal columns (REQUIRED if no tty; = pane width)
     \\  --rows N            virtual terminal rows (default: input line count)
     \\  --font FAMILY       CSS font-family (default: monospace)
+    \\  --title TITLE       document <title> (default: "tmux-2html" or derived)
+    \\  --lang LANG         document lang, BCP-47 (default: en / locale)
     \\  --palette MODE      default | cached | live  (default: cached->live->default)
     \\  --output FILE       write here instead of stdout
     \\  --open              xdg-open the output (implies --output if none given)
@@ -310,6 +330,8 @@ const pane_help =
     \\  --full              entire scrollback + visible (mutually exclusive of --visible)
     \\  --history N         with --full, cap scrollback to last N lines (default 50000)
     \\  --font FAMILY       CSS font-family
+    \\  --title TITLE       document <title> (default: "tmux-2html" or derived)
+    \\  --lang LANG         document lang, BCP-47 (default: en / locale)
     \\  --output FILE       write here instead of stdout
     \\  --open              xdg-open the output
     \\  --help              show this help
@@ -326,6 +348,8 @@ const region_help =
     \\Options:
     \\  --target PANE       target pane id (default: $TMUX_PANE)
     \\  --font FAMILY       CSS font-family
+    \\  --title TITLE       document <title> (default: "tmux-2html" or derived)
+    \\  --lang LANG         document lang, BCP-47 (default: en / locale)
     \\  --output FILE       write here instead of stdout
     \\  --open              xdg-open the output
     \\  --help              show this help
@@ -453,6 +477,24 @@ test "parseRender: defaults" {
     try std.testing.expectEqual(PaletteMode.cached, opts.palette_mode);
     try std.testing.expect(!opts.open);
     try std.testing.expectEqual(@as(?SelectionCoords, null), opts.selection);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.title);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.lang);
+}
+
+test "parseRender: --title and --lang" {
+    const opts = try parseRender(&[_][]const u8{ "--title", "My Pane", "--lang", "fr" });
+    try std.testing.expectEqualStrings("My Pane", opts.title.?);
+    try std.testing.expectEqualStrings("fr", opts.lang.?);
+}
+
+test "parseRender: --title missing value" {
+    try std.testing.expectError(error.MissingValue, parseRender(&[_][]const u8{"--title"}));
+    // flag-like value is treated as missing (requireValue gotcha):
+    try std.testing.expectError(error.MissingValue, parseRender(&[_][]const u8{ "--title", "--lang", "x" }));
+}
+
+test "parseRender: --lang missing value" {
+    try std.testing.expectError(error.MissingValue, parseRender(&[_][]const u8{"--lang"}));
 }
 
 test "parseRender: --cols=value form" {
@@ -504,6 +546,14 @@ test "parsePane: visible default flag alone" {
     const opts = try parsePane(&[_][]const u8{"--visible"});
     try std.testing.expect(opts.visible);
     try std.testing.expect(!opts.full);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.title);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.lang);
+}
+
+test "parsePane: --title and --lang" {
+    const opts = try parsePane(&[_][]const u8{ "--target", "%5", "--title", "T", "--lang", "en-US" });
+    try std.testing.expectEqualStrings("T", opts.title.?);
+    try std.testing.expectEqualStrings("en-US", opts.lang.?);
 }
 
 test "parsePane: visible and full are mutually exclusive" {
@@ -516,6 +566,14 @@ test "parseRegion: options" {
     try std.testing.expectEqualStrings("%9", opts.target.?);
     try std.testing.expectEqualStrings("Serif", opts.font);
     try std.testing.expect(opts.open);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.title);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.lang);
+}
+
+test "parseRegion: --title and --lang" {
+    const opts = try parseRegion(&[_][]const u8{ "--title", "R", "--lang", "de" });
+    try std.testing.expectEqualStrings("R", opts.title.?);
+    try std.testing.expectEqualStrings("de", opts.lang.?);
 }
 
 test "parseRegion: rejects pane-only flags" {
@@ -542,6 +600,11 @@ test "parseSyncPalette: from file PATH" {
 test "parseSyncPalette: bad source" {
     try std.testing.expectError(error.BadPaletteSource, parseSyncPalette(&[_][]const u8{ "--from", "ftp" }));
     try std.testing.expectError(error.MissingValue, parseSyncPalette(&[_][]const u8{"--from"}));
+}
+
+test "parseSyncPalette: rejects --title and --lang" {
+    try std.testing.expectError(error.UnknownFlag, parseSyncPalette(&[_][]const u8{ "--title", "x" }));
+    try std.testing.expectError(error.UnknownFlag, parseSyncPalette(&[_][]const u8{ "--lang", "en" }));
 }
 
 test "hasHelpFlag" {
