@@ -359,7 +359,7 @@
       "type": "Phase",
       "id": "P2",
       "title": "tmux Capture & Plugin",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Make the binary tmux-aware: capture panes (PRD §5.2), then ship the full TPM plugin (entrypoint, options, bindings) and the build-or-download binary acquisition (PRD §9, §10). After this phase a user installs via TPM and `prefix O` renders the pane. Depends on P1 (renderer + palette cache).",
       "milestones": [
         {
@@ -440,7 +440,7 @@
           "type": "Milestone",
           "id": "P2.M2",
           "title": "TPM Plugin (entrypoint, options, bindings)",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Create `tmux-2html.tmux` (PRD §9.1): resolve the binary, read @tmux-2html-* options, bind keys (PRD §9.3), and trigger the one-time palette auto-sync popup (PRD §6).",
           "tasks": [
             {
@@ -487,14 +487,14 @@
               "type": "Task",
               "id": "P2.M2.T2",
               "title": "Prefix-table bindings",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Bind O (full), the visible key (if set), and C-o (region popup) per PRD §9.3, with the .last-output sidecar notification for region.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P2.M2.T2.S1",
                   "title": "O (full) + visible bindings (run-shell pane)",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P2.M2.T1.S1",

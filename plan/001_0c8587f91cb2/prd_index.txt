@@ -7,7 +7,7 @@ h1.0 tmux-2html — Product Requirements & Technical Specification
  h2.3 3. Architecture
  h2.4 4. Repository layout
  h2.5 5. The binary — CLI surface
-  h3.2 5.1 tmux-2html render — core renderer (stdin → HTML)
+  h3.2 5.1 tmux-2html render — core renderer (stdin → complete HTML5 document)
   h3.3 5.2 tmux-2html pane — capture a pane → HTML
   h3.4 5.3 tmux-2html region — interactive copy-mode overlay → HTML
   h3.5 5.4 tmux-2html sync-palette — query + cache the palette
@@ -21,10 +21,11 @@ h1.0 tmux-2html — Product Requirements & Technical Specification
   h3.11 7.5 Confirm / cancel
   h3.12 7.6 Mouse (supported)
  h2.8 8. Rendering engine (render.zig)
+  h3.13 8.1 HTML document envelope (normative — "no cutting corners")
  h2.9 9. tmux plugin
-  h3.13 9.1 Entrypoint tmux-2html.tmux
-  h3.14 9.2 Options (tmux user options, @tmux-2html-*)
-  h3.15 9.3 Bindings (prefix table)
+  h3.14 9.1 Entrypoint tmux-2html.tmux
+  h3.15 9.2 Options (tmux user options, @tmux-2html-*)
+  h3.16 9.3 Bindings (prefix table)
  h2.10 10. Binary acquisition (scripts/ensure_binary.sh)
  h2.11 11. Build & release
  h2.12 12. Dependencies & pinned versions
@@ -34,4 +35,4 @@ h1.0 tmux-2html — Product Requirements & Technical Specification
  h2.16 16. Roadmap (out of v1 scope)
  h2.17 17. Decisions log
 ---
-code:8 para:30 list:22 table:1 quote:2
+code:9 para:34 list:23 table:1 quote:2
