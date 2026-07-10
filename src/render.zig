@@ -190,6 +190,99 @@ pub const DocumentOpts = struct {
     background: ?ghostty_vt.color.RGB = null, // page bg = terminal bg (null => no inline bg)
 };
 
+// ---------------------------------------------------------------------------
+// Lang resolution (PRD §8.1 <html lang>; algorithm: architecture/lang_resolution.md).
+// POSIX locale name -> BCP-47 tag. Precedence: explicit --lang / @tmux-2html-lang
+// -> LC_ALL -> LC_MESSAGES -> LANG -> "en". Allocation-free (module-level buffer).
+// ---------------------------------------------------------------------------
+
+/// Output buffer for a normalized BCP-47 tag. Overwritten on each call; safe because
+/// toBcp47/langFromEnv/resolveLang are each called once per render and the result is
+/// stored into DocumentOpts.lang and consumed during that single writeDocument.
+/// (A normalized tag is at most 6 chars — `xxx-XX` — so [16] is generous.)
+var bcp47_buf: [16]u8 = undefined;
+
+/// Pure POSIX-locale -> BCP-47 transform. Strips `.codeset` (from first '.') and
+/// `@modifier` (from first '@'), maps `_`->`-`, lowercases the language subtag,
+/// uppercases the region subtag, and validates against `^[a-z]{2,3}(-[A-Z]{2})?$`.
+/// Returns null for C/POSIX/empty/invalid shapes; the caller falls back to "en".
+/// PURE (no I/O, no alloc) -> unit-testable; does NOT mutate its input.
+fn toBcp47(locale: []const u8) ?[]const u8 {
+    var s = locale;
+    if (std.mem.indexOfScalar(u8, s, '.')) |i| s = s[0..i]; // strip .codeset
+    if (std.mem.indexOfScalar(u8, s, '@')) |i| s = s[0..i]; // strip @modifier
+
+    // First '_' or '-' separates language from territory.
+    var sep_idx: ?usize = null;
+    for (s, 0..) |c, i| if (c == '_' or c == '-') {
+        sep_idx = i;
+        break;
+    };
+
+    const lang_src = if (sep_idx) |i| s[0..i] else s;
+    const region_src: ?[]const u8 = blk: {
+        if (sep_idx) |i| {
+            if (i + 1 >= s.len) break :blk null; // trailing separator, no region
+            break :blk s[i + 1 ..];
+        } else break :blk null;
+    };
+
+    // Language subtag: 2-3 lowercase a-z.
+    if (lang_src.len < 2 or lang_src.len > 3) return null;
+    var out_len: usize = 0;
+    for (lang_src) |c| {
+        const lc = std.ascii.toLower(c);
+        if (lc < 'a' or lc > 'z') return null;
+        bcp47_buf[out_len] = lc;
+        out_len += 1;
+    }
+
+    // Region subtag (optional): exactly 2 uppercase A-Z, no embedded separator.
+    if (region_src) |r| {
+        if (r.len != 2) return null;
+        if (r[0] == '_' or r[0] == '-' or r[1] == '_' or r[1] == '-') return null;
+        bcp47_buf[out_len] = '-';
+        out_len += 1;
+        for (r) |c| {
+            const uc = std.ascii.toUpper(c);
+            if (uc < 'A' or uc > 'Z') return null;
+            bcp47_buf[out_len] = uc;
+            out_len += 1;
+        }
+    }
+
+    return bcp47_buf[0..out_len];
+}
+
+/// Pure precedence resolver (LC_ALL -> LC_MESSAGES -> LANG -> "en"). Set-but-EMPTY
+/// values count as unset (POSIX override semantics). The first non-empty candidate
+/// wins; if its transform fails, fall directly to "en" (no cascade — POSIX: LC_ALL
+/// overrides everything). Param-taking so it is deterministic & unit-testable.
+fn langFromEnvStrings(lc_all: ?[]const u8, lc_messages: ?[]const u8, lang: ?[]const u8) []const u8 {
+    if (lc_all) |v| if (v.len > 0) return toBcp47(v) orelse "en";
+    if (lc_messages) |v| if (v.len > 0) return toBcp47(v) orelse "en";
+    if (lang) |v| if (v.len > 0) return toBcp47(v) orelse "en";
+    return "en";
+}
+
+/// Locale-only resolution (precedence + transform + fallback). Reads the process
+/// environment via std.posix.getenv (same pattern as tempHtmlPath at :565). NO /dev/tty.
+pub fn langFromEnv() []const u8 {
+    return langFromEnvStrings(
+        std.posix.getenv("LC_ALL"),
+        std.posix.getenv("LC_MESSAGES"),
+        std.posix.getenv("LANG"),
+    );
+}
+
+/// Resolve the <html lang> value (PRD §8.1). Explicit --lang / @tmux-2html-lang
+/// wins; an explicit invalid value (e.g. "C", "english") degrades defensively to
+/// "en". Otherwise derive from the locale; else "en".
+pub fn resolveLang(explicit: ?[]const u8) []const u8 {
+    if (explicit) |e| return toBcp47(e) orelse "en";
+    return langFromEnv();
+}
+
 /// HTML-escape `s` into `out` (PRD §8.1: <title> etc. is HTML-escaped; cell text stays
 /// ghostty-vt's job). Escapes & < > " ' per OWASP. PURE (no alloc) => unit-testable.
 fn writeEscaped(out: *std.Io.Writer, s: []const u8) !void {
@@ -1338,4 +1431,89 @@ test "clampExtent: last_row==0 (degenerate) -> y collapses to 0" {
     try std.testing.expectEqual(@as(u32, 0), got.y2); // 5 -> 0
     try std.testing.expectEqual(@as(u32, 0), got.x1);
     try std.testing.expectEqual(@as(u32, 0), got.x2); // x2=0 < last_col=9, no clamp needed
+}
+
+// ---- Lang resolution unit tests (PRD §8.1; architecture/lang_resolution.md) ----
+
+test "toBcp47: en_US.UTF-8 -> en-US" {
+    try std.testing.expectEqualStrings("en-US", toBcp47("en_US.UTF-8").?);
+}
+test "toBcp47: pt_BR.UTF-8 -> pt-BR" {
+    try std.testing.expectEqualStrings("pt-BR", toBcp47("pt_BR.UTF-8").?);
+}
+test "toBcp47: de_DE@euro -> de-DE" {
+    try std.testing.expectEqualStrings("de-DE", toBcp47("de_DE@euro").?);
+}
+test "toBcp47: zh_CN -> zh-CN" {
+    try std.testing.expectEqualStrings("zh-CN", toBcp47("zh_CN").?);
+}
+test "toBcp47: plain lang en -> en" {
+    try std.testing.expectEqualStrings("en", toBcp47("en").?);
+}
+test "toBcp47: case normalization en_us -> en-US" {
+    try std.testing.expectEqualStrings("en-US", toBcp47("en_us").?);
+}
+test "toBcp47: already BCP-47 en-US -> en-US" {
+    try std.testing.expectEqualStrings("en-US", toBcp47("en-US").?);
+}
+test "toBcp47: 3-letter lang eng_GB -> eng-GB" {
+    try std.testing.expectEqualStrings("eng-GB", toBcp47("eng_GB").?);
+}
+test "toBcp47: C -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("C"));
+}
+test "toBcp47: POSIX -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("POSIX"));
+}
+test "toBcp47: C.UTF-8 -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("C.UTF-8"));
+}
+test "toBcp47: empty -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47(""));
+}
+test "toBcp47: too-long lang english -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("english"));
+}
+test "toBcp47: 1-char lang e_US -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("e_US"));
+}
+test "toBcp47: 3-char region en_USA -> null" {
+    try std.testing.expectEqual(@as(?[]const u8, null), toBcp47("en_USA"));
+}
+
+test "langFromEnvStrings: LC_ALL wins over LC_MESSAGES and LANG" {
+    try std.testing.expectEqualStrings("en-US", langFromEnvStrings("en_US.UTF-8", "pt_BR.UTF-8", "de_DE"));
+}
+test "langFromEnvStrings: LC_MESSAGES when LC_ALL null" {
+    try std.testing.expectEqualStrings("pt-BR", langFromEnvStrings(null, "pt_BR.UTF-8", "de_DE"));
+}
+test "langFromEnvStrings: LANG when LC_ALL and LC_MESSAGES null" {
+    try std.testing.expectEqualStrings("de-DE", langFromEnvStrings(null, null, "de_DE@euro"));
+}
+test "langFromEnvStrings: all null -> en" {
+    try std.testing.expectEqualStrings("en", langFromEnvStrings(null, null, null));
+}
+test "langFromEnvStrings: empty treated as unset -> en" {
+    try std.testing.expectEqualStrings("en", langFromEnvStrings("", "", ""));
+}
+test "langFromEnvStrings: LC_ALL=C (invalid, no cascade) -> en" {
+    try std.testing.expectEqualStrings("en", langFromEnvStrings("C", "en_US.UTF-8", "en_US.UTF-8"));
+}
+
+test "resolveLang: explicit valid wins over locale" {
+    try std.testing.expectEqualStrings("fr", resolveLang("fr"));
+}
+test "resolveLang: explicit locale normalized" {
+    try std.testing.expectEqualStrings("en-US", resolveLang("en_US.UTF-8"));
+}
+test "resolveLang: explicit C -> en" {
+    try std.testing.expectEqualStrings("en", resolveLang("C"));
+}
+test "resolveLang: explicit invalid -> en" {
+    try std.testing.expectEqualStrings("en", resolveLang("english"));
+}
+test "resolveLang: explicit null falls to env (non-empty result)" {
+    // langFromEnv() reads the real host env (not deterministic); just assert validity.
+    const got = resolveLang(null);
+    try std.testing.expect(got.len > 0);
 }

@@ -41,7 +41,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "Pure locale→BCP-47 lang resolver (langFromEnv / resolveLang) + unit tests",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: see plan/002_e3d8d22c088d/architecture/lang_resolution.md for the full algorithm + sources (POSIX/glibc/RFC 5646 BCP 47 / WHATWG HTML / MDN). Precedence: `@tmux-2html-lang`/`--lang` explicit → locale (LC_ALL→LC_MESSAGES→LANG) → 'en'. Build is `.link_libc=false`; read env via `std.posix.getenv` (already used in render.zig for TMPDIR).\n2. INPUT: an optional explicit `?[]const u8` lang (from --lang / @tmux-2html-lang) plus the process env.\n3. LOGIC: Implement in src/render.zig (next to DocumentOpts). Make the core PURE & deterministic for testing: a `fn toBcp47(locale: []const u8) ?[]const u8` (strip `.codeset`/`@modifier`, `_`→`-`, lower lang / UPPER region, reject C/POSIX/empty/`^[a-z]{2,3}(-[A-Z]{2})?$` failures → null) and a `fn langFromEnvStrings(lc_all, lc_messages, lang: ?[]const u8) []const u8` precedence resolver returning 'en' fallback. Public `pub fn langFromEnv() []const u8` calls the strings fn with `std.posix.getenv` values; `pub fn resolveLang(explicit: ?[]const u8) []const u8` = `if (explicit) |e| (toBcp47(e) orelse \"en\") else langFromEnv()`. NO /dev/tty. Prefer no allocation (env strings are mutable process memory; in-place normalization of the returned slice is acceptable, else a small stack buffer). TDD: en_US.UTF-8→en-US; pt_BR.UTF-8→pt-BR; de_DE@euro→de-DE; zh_CN→zh-CN; C/POSIX/C.UTF-8→en; unset→en; explicit invalid→en; explicit wins over locale.\n4. OUTPUT: `resolveLang(opts.lang) []const u8` consumed by S3 (render.run) and S4 (pane/region) to set DocumentOpts.lang.\n5. DOCS: none — internal helper, no user-facing/config/API surface change.",
@@ -54,7 +54,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S3",
                   "title": "render.run wires resolved title + lang into DocumentOpts",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 0.5,
                   "dependencies": [
                     "P1.M1.T1.S1",
