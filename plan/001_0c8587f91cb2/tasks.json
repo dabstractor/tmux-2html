@@ -579,7 +579,7 @@
       "type": "Phase",
       "id": "P3",
       "title": "Region TUI (Interactive Copy-Mode Selection)",
-      "status": "Researching",
+      "status": "Complete",
       "description": "The largest bespoke component (PRD §7): a full-screen, raw-termios, alt-screen TUI hosted in a tmux display-popup that lets the user move/search and select a line-range or block over the captured full scrollback, then renders exactly that selection to HTML. Written from scratch in Zig std-lib (term2html has no TUI). Depends on P1 (renderGrid + selection machinery); the plugin binding (P2.M2.T2.S2) invokes this.",
       "milestones": [
         {
@@ -761,14 +761,14 @@
           "type": "Milestone",
           "id": "P3.M3",
           "title": "region Subcommand Wiring (confirm/cancel)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Wire PRD §5.3 `region`: capture full scrollback → grid → launch TUI; on confirm render the selection; on cancel exit with no output.",
           "tasks": [
             {
               "type": "Task",
               "id": "P3.M3.T1",
               "title": "region subcommand: capture → TUI → render",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Tie capture (full mode), the TUI, the selection, and renderGrid together per PRD §5.3/§7.5.",
               "subtasks": [
                 {
@@ -791,7 +791,7 @@
                   "type": "Subtask",
                   "id": "P3.M3.T1.S2",
                   "title": "Confirm/cancel → renderGrid(selection) + .last-output sidecar + output filename",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P3.M3.T1.S1",
@@ -836,7 +836,7 @@
                   "type": "Subtask",
                   "id": "P4.M1.T1.S1",
                   "title": "4-target matrix build + tar.xz + SHA256SUMS + draft release",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S2",

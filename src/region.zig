@@ -44,6 +44,7 @@ const view = @import("tui/view.zig");
 const input = @import("tui/input.zig");
 const motion = @import("tui/motion.zig");
 const select = @import("tui/select.zig");
+const fmt = @import("ghostty_format.zig"); // ScreenFormatter (the renderGrid formatter block, verbatim)
 const ghostty_vt = @import("ghostty-vt");
 
 const Terminal = ghostty_vt.Terminal;
@@ -409,16 +410,249 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
     };
 
     // (10) Loop exited. Terminal restores via the defer above (so any post-loop I/O is cooked).
-    //      Quit => exit 1 (PRD 7.5: cancel, no output). Confirm => exit 1 (S1 STUB: confirm is
-    //      recognized but render is S2; no file is produced so exit 0 would be dishonest. S2
-    //      changes this to `=> 0` + render + sidecar; the seam is identical). none => exit 1
-    //      (unreachable: runEvents returns only on quit/confirm; eof => quit).
+    //      Quit => exit 1 (PRD 7.5: cancel, no output). Confirm => P3.M3.T1.S2 render + sidecar
+    //      (toGhosttySelection -> ScreenFormatter against ctx.grid -> writeHtmlAtomic ->
+    //      .last-output sidecar -> --open; exit 0 on success). none => exit 1 (unreachable:
+    //      runEvents returns only on quit/confirm; eof => quit).
+    //
+    //      The confirm arm calls app.exit(state) FIRST so every subsequent stderr/file write
+    //      happens in COOKED mode (the empty-selection warn is readable, not garbled in raw /
+    //      alt-screen). app.exit is idempotent (app.zig atomic `entered` guard) => the body-scope
+    //      `defer app.exit(state)` above is a later no-op. ctx.grid stays valid after app.exit (the
+    //      in-memory Terminal is freed by `defer t.deinit` at body end, independent of the display
+    //      restore).
     return switch (action) {
         .quit => 1,
-        .confirm => 1, // P3.M3.T1.S2: render.toGhosttySelection(sel, grid, tty_cols) -> renderGrid
-                       //                  -> .last-output sidecar + output filename + --open; return 0.
-        .none => 1,
+        // P3.M3.T1.S2: the confirm-render flow (design_notes S1). The binding (P2.M2.T2.S2)
+        // passes ONLY --target, so region reads @tmux-2html-font/@tmux-2html-open itself; opts.open
+        // is OR'd in so a direct `region --open` still works. The path reaches the user ONLY via
+        // the .last-output sidecar -> wrapper -> display-message (the popup has no tmux message
+        // channel; region must NOT print to stdout). Every error path => stderr + exit 1 (no
+        // partial sidecar). The sidecar is BEST-EFFORT: a .last-output write failure must NOT fail
+        // the render (the HTML is already written) => log + continue to 0.
+        .confirm => confirm_render: {
+            app.exit(state); // restore FIRST (cooked-mode warns; idempotent with the defer above)
+
+            // PRD 7.5: empty selection => warn, no file, exit 1. "Empty" == no selection begun
+            // (sel inactive). The TUI lets Enter/y through regardless (the handler returns
+            // .confirm unconditionally); THIS arm is where the empty guard lives. (`stderr` is
+            // body()'s already-declared stderr writer.)
+            if (!ctx.sel.active()) {
+                stderr.writeAll("tmux-2html region: no selection (press v to begin, then Enter)\n") catch {};
+                break :confirm_render 1;
+            }
+
+            // Read the AUTHORITATIVE @tmux-2html-* options (binding passes only --target). font:
+            // readFontOption defaults to "monospace" on unset; on a query error fall back to
+            // ctx.font (the cli default, usually also "monospace"). open: OR opts.open (direct
+            // `region --open`) with @tmux-2html-open (default on). See docs/CONFIGURATION.md
+            // "How options are read".
+            const font = readFontOption(runner, allocator) catch ctx.font;
+            defer allocator.free(font);
+            const do_open = opts.open or readBoolOption(runner, allocator, "@tmux-2html-open", true);
+
+            // Render the user's selection against the EXISTING grid (no Terminal rebuild).
+            // toGhosttySelection (P3.M2.T2.S2, pub) returns a native ghostty Selection whose pins
+            // are tied to ctx.grid; the ScreenFormatter formats it (the SAME block renderGrid uses
+            // internally, copied verbatim into renderSelectionHtml).
+            const html = renderSelectionHtml(allocator, &ctx, font) catch {
+                stderr.writeAll("tmux-2html region: render failed\n") catch {};
+                break :confirm_render 1;
+            };
+            defer allocator.free(html);
+
+            // Output path: explicit --output wins; else <session>-<unixtime>-<pid>.html in the
+            // configured output dir (mirrors pane's panePrepare via the SHIPPED capture.* helpers).
+            const path = resolveOutputPath(allocator, opts, target, runner) catch {
+                stderr.writeAll("tmux-2html region: cannot resolve output path\n") catch {};
+                break :confirm_render 1;
+            };
+            defer allocator.free(path);
+            if (std.fs.path.dirname(path)) |dp| std.fs.cwd().makePath(dp) catch {}; // ensure dir exists
+
+            // Atomic write (temp + rename in the same dir; render.zig's writeFileAtomic idiom).
+            writeHtmlAtomic(allocator, path, html) catch {
+                stderr.writeAll("tmux-2html region: cannot write output file\n") catch {};
+                break :confirm_render 1;
+            };
+
+            // .last-output sidecar (PRD 7.5 + 9.3): write the BARE output path to a file named
+            // `.last-output` in region's OWN executable dir. Exported loader vars ($TMUX_2HTML_BIN)
+            // do NOT reach the popup child, so region derives its bin dir via /proc/self/exe
+            // (selfExePath). Best-effort: a sidecar write failure does NOT fail the render.
+            if (selfBinDir(allocator)) |bin_dir| {
+                defer allocator.free(bin_dir);
+                writeLastOutput(bin_dir, path) catch {};
+            } else |_| {
+                stderr.writeAll("tmux-2html region: cannot determine bin dir for .last-output sidecar\n") catch {};
+            }
+
+            // --open (best-effort; never changes the exit code; mirrors render.spawnXdgOpen).
+            if (do_open) render.spawnXdgOpen(path, allocator);
+
+            break :confirm_render 0;
+        },
+        .none => 1, // unreachable: runEvents returns only on quit/confirm; eof => quit
     };
+}
+
+// ============================================================================
+// P3.M3.T1.S2 helpers (the confirm-render support) — all module-private `fn`s.
+// NONE touch a Terminal => ALL are safe as separate unit-test fns (the cross-test
+// GOTCHA forbids Terminal-building test fns, but these are PURE / fs-only /
+// Runner-seamed). renderSelectionHtml is the ONE exception (formats ctx.grid) =>
+// it is compile-verified + manually smoke-tested (Level 3); its fidelity is
+// ALREADY proven in render.zig's single Terminal test scope (P3.M2.T2.S2).
+// ============================================================================
+
+/// Render ctx.sel against the LOADED ctx.grid to an OWNED HTML buffer (caller frees). Uses
+/// `render.toGhosttySelection` (P3.M2.T2.S2, pub, INFALLIBLE — clamps instead of erroring) + the
+/// vendored ScreenFormatter (the SAME block `render.renderGrid` uses internally, copied
+/// verbatim). NOT unit-testable (touches ctx.grid => Terminal => the cross-test GOTCHA); the
+/// selection->HTML fidelity is ALREADY proven in render.zig's single Terminal test scope
+/// (toGhosttySelection + formatSelOnScreen). region.zig is GLUE over it.
+///
+/// WHY format ctx.grid (NOT a renderGrid rebuild): toGhosttySelection returns a native
+/// Selection whose pins are tied to ctx.grid (pins are bound to the PageList they were created
+/// from) => the formatter MUST run against THAT SAME screen. A renderGrid rebuild would build a
+/// different Terminal (its pins would be invalid for this Selection) — that's the alternative
+/// clampExtent+renderGrid path (see design_notes S3), avoided here.
+fn renderSelectionHtml(allocator: std.mem.Allocator, ctx: *RegionCtx, font: []const u8) ![]u8 {
+    var aw = try std.Io.Writer.Allocating.initCapacity(allocator, 4096);
+    defer aw.deinit();
+    const gs = render.toGhosttySelection(ctx.sel, ctx.grid, ctx.tty_cols); // infallible; clamps
+    // VERBATIM copy of render.renderGrid's formatter block (render.zig ~lines 140-150): the
+    // ONLY diffs are screen=ctx.grid + selection=gs (vs a fresh Terminal + buildSelection).
+    var f = fmt.ScreenFormatter.init(ctx.grid, .{
+        .emit = .html,
+        .background = ctx.colors.background,
+        .foreground = ctx.colors.foreground,
+        .palette = &ctx.colors.palette,
+        .font = font,
+    });
+    f.content = .{ .selection = gs }; // null = whole grid; some(gs) = the selection sub-grid
+    f.extra = .styles; // per-cell <span> inline CSS + OSC-8 <a> hyperlinks
+    try aw.writer.print("{f}", .{f});
+    return allocator.dupe(u8, aw.writer.buffered()); // OWNED copy (mirrors render.renderToOwned)
+}
+
+/// Resolve the output path: explicit `--output FILE` wins; else build the collision-safe
+/// `<session>-<unixtime>-<pid>.html` in `capture.resolveOutputDir` (reads @tmux-2html-output-dir /
+/// XDG / HOME). Caller owns the returned slice. Mirrors pane's panePrepare path logic via the
+/// SHIPPED capture.* pub helpers. Pure-ish (Runner-seamed; NO Terminal => unit-testable).
+///
+/// On a session-name query failure, the session falls back to "" (sanitizeFilename => "pane").
+/// `resolveOutputDir` returns `error.NoHome` if neither XDG nor HOME is usable => maps to the
+/// caller's error path (exit 1).
+fn resolveOutputPath(
+    allocator: std.mem.Allocator,
+    opts: cli.RegionOpts,
+    target: []const u8,
+    runner: capture.Runner,
+) ![]u8 {
+    if (opts.output) |p| return allocator.dupe(u8, p); // explicit --output wins verbatim
+    const out_dir = try capture.resolveOutputDir(runner, allocator); // @tmux-2html-output-dir/XDG/HOME
+    defer allocator.free(out_dir);
+    // querySessionName returns "" on error (=> sanitizeFilename falls back to "pane").
+    const session = capture.querySessionName(runner, allocator, target) catch
+        try allocator.alloc(u8, 0);
+    defer allocator.free(session);
+    const sess_trim = std.mem.trim(u8, session, " \t\n\r");
+    const ts = std.time.timestamp(); // Unix seconds (matches pane's panePrepare)
+    const fname = try capture.buildOutputFilename(allocator, sess_trim, ts, regionPid());
+    defer allocator.free(fname);
+    return capture.buildOutputPath(allocator, out_dir, fname);
+}
+
+/// region's pid for collision-safe filenames (mirrors main.zig's private currentPid; Linux
+/// getpid, else 0). Reimplemented here because currentPid is main.zig-private (region must not
+/// edit main.zig — S1 owns the main.zig dispatch wiring). PURE => unit-testable.
+fn regionPid() i32 {
+    return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
+}
+
+/// region's OWN executable dir (where `.last-output` is written). Uses /proc/self/exe
+/// (`std.fs.selfExePath`) since `$TMUX_2HTML_BIN` is NOT visible to the popup child (exported
+/// loader vars don't reach run-shell/popup children — P2.M2.T2.S2 GOTCHA). Caller owns the
+/// returned slice. selfExePath is VERIFIED Zig 0.15.2 (fs.zig:545; takes a caller buffer,
+/// returns a slice into it; `max_path_bytes` is the documented buffer size). fs-only =>
+/// unit-testable.
+fn selfBinDir(allocator: std.mem.Allocator) ![]u8 {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const exe = try std.fs.selfExePath(&buf); // SelfExePathError if /proc unavailable (never in popup)
+    const dir = std.fs.path.dirname(exe) orelse "."; // null for a bare filename => cwd
+    return allocator.dupe(u8, dir);
+}
+
+/// Write the BARE `output_path` to `<bin_dir>/.last-output` (the wrapper reads it to
+/// display-message "tmux-2html: wrote <path>"). Overwrites (the wrapper pre-clears it via
+/// `rm -f`). Dir-scoped + unit-testable (inject a tmpDir as bin_dir). The content is the BARE
+/// path, NO "wrote" prefix (the wrapper prepends it). Uses page_allocator for the tiny transient
+/// join string (freed before return — no leak).
+fn writeLastOutput(bin_dir: []const u8, output_path: []const u8) !void {
+    const sidecar = try std.fs.path.join(std.heap.page_allocator, &.{ bin_dir, ".last-output" });
+    defer std.heap.page_allocator.free(sidecar);
+    var f = try std.fs.cwd().createFile(sidecar, .{ .truncate = true });
+    defer f.close();
+    try f.writeAll(output_path); // BARE path, NO "wrote" prefix
+}
+
+/// Write pre-rendered `bytes` to `path` ATOMICALLY (temp + rename in the same dir). Mirrors
+/// render.zig's writeFileAtomic idiom (same-dir temp => atomic rename, no EXDEV). Cleans up the
+/// temp on error. Duplicates render.zig's PRIVATE writeFileAtomic INTENTIONALLY — keeps
+/// render.zig untouched (P3.M2.T2.S2 owns it in parallel); render.renderToFileAtomic renders
+/// the WHOLE grid (sel:null), unusable for a pre-rendered selection buffer. fs-only =>
+/// unit-testable (tmpDir round-trip).
+fn writeHtmlAtomic(allocator: std.mem.Allocator, path: []const u8, bytes: []const u8) !void {
+    const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
+    const base = std.fs.path.basename(path);
+
+    // Name the temp `.{base}.{rand}.tmp` next to `{base}` (same dir => same filesystem).
+    var rnd: [4]u8 = undefined;
+    std.crypto.random.bytes(&rnd);
+    const tmp_name = try std.fmt.allocPrint(allocator, ".{s}.{x}.tmp", .{ base, @as(u32, @bitCast(rnd)) });
+    defer allocator.free(tmp_name);
+
+    // Open the target's directory as a real, closeable handle (cwd() returns one you must NOT
+    // close; openDir(".") does close).
+    var dir = if (std.fs.path.isAbsolute(dir_path))
+        try std.fs.openDirAbsolute(dir_path, .{})
+    else
+        try std.fs.cwd().openDir(dir_path, .{});
+    defer dir.close();
+
+    var f = try dir.createFile(tmp_name, .{}); // truncate default
+    errdefer {
+        f.close();
+        dir.deleteFile(tmp_name) catch {};
+    }
+    try f.writeAll(bytes);
+    f.sync() catch {}; // best-effort durability before rename
+    f.close();
+
+    try dir.rename(tmp_name, base); // same dir => atomic
+}
+
+/// Read a boolean @tmux-2html-* option (the binding passes only --target, so region reads its
+/// behavior options itself). "on"/"true"/"yes"/"1" (case-insensitive) => true; empty/unset =>
+/// `default`; any other value (e.g. "off", "junk") => false. Runner-seamed => unit-testable.
+fn readBoolOption(runner: capture.Runner, allocator: std.mem.Allocator, name: []const u8, default: bool) bool {
+    const v = capture.queryOption(runner, allocator, name) catch return default; // query error => default
+    defer allocator.free(v);
+    const t = std.mem.trim(u8, v, " \t\n\r");
+    if (t.len == 0) return default;
+    return std.ascii.eqlIgnoreCase(t, "on") or std.ascii.eqlIgnoreCase(t, "true") or
+        std.ascii.eqlIgnoreCase(t, "yes") or std.mem.eql(u8, t, "1");
+}
+
+/// Read @tmux-2html-font (default "monospace"). Caller owns the returned slice. ""/unset =>
+/// "monospace". Runner-seamed => unit-testable.
+fn readFontOption(runner: capture.Runner, allocator: std.mem.Allocator) ![]u8 {
+    const v = try capture.queryOption(runner, allocator, "@tmux-2html-font");
+    defer allocator.free(v);
+    const t = std.mem.trim(u8, v, " \t\n\r");
+    if (t.len == 0) return allocator.dupe(u8, "monospace");
+    return allocator.dupe(u8, t);
 }
 
 // ============================================================================
@@ -539,4 +773,217 @@ test "regionPrepare: @tmux-2html-history-limit non-numeric => defaults to 50000"
 
     try testing.expect(!cap.truncated);
     try testing.expectEqual(@as(u32, 50000), cap.effective);
+}
+
+// ============================================================================
+// P3.M3.T1.S2 helper unit tests — ALL safe as separate fns (NO Terminal).
+// resolveOutputPath / readBoolOption / readFontOption use the OptFake Runner
+// (below); writeLastOutput / writeHtmlAtomic are fs-only (tmpDir); regionPid /
+// selfBinDir are PURE / fs. The cross-test GOTCHA is respected (no Terminal).
+// ============================================================================
+
+/// Test double for the capture.Runner seam for the OPTION + filename helpers
+/// (self-contained, mirrors main.zig's PaneFake). Answers `show-option` (any
+/// @tmux-2html-* name => its value or "" for unset) + `display-message`
+/// (`#{session_name}` => self.session). Per-instance state => no cross-test
+/// contamination. NO Terminal => safe.
+const OptFake = struct {
+    options: std.StringHashMap([]const u8),
+    session: []const u8 = "sess",
+
+    fn run(ctx: *anyopaque, argv: []const []const u8, alloc: std.mem.Allocator) anyerror![]u8 {
+        const self: *OptFake = @ptrCast(@alignCast(ctx));
+        const hasArg = struct {
+            fn f(a: []const []const u8, needle: []const u8) bool {
+                for (a) |x| if (std.mem.eql(u8, x, needle)) return true;
+                return false;
+            }
+        }.f;
+        if (hasArg(argv, "display-message")) {
+            if (hasArg(argv, "#{session_name}")) return alloc.dupe(u8, self.session);
+            return error.UnexpectedArgv;
+        }
+        if (hasArg(argv, "show-option")) {
+            // argv = { "tmux", "show-option", "-gqv", name }
+            if (argv.len >= 4) {
+                const name = argv[argv.len - 1];
+                if (self.options.get(name)) |v| return alloc.dupe(u8, v);
+            }
+            return alloc.alloc(u8, 0); // unset => empty
+        }
+        return error.UnexpectedArgv;
+    }
+};
+
+/// Build an OptFake with a set of options (convenience for the option tests). `options`
+/// is a slice of `.k`/`.v` field tuples (anonymous struct literals coerce to this).
+fn optFake(options: []const struct { k: []const u8, v: []const u8 }, session: []const u8) OptFake {
+    var f = OptFake{ .options = std.StringHashMap([]const u8).init(testing.allocator), .session = session };
+    for (options) |kv| f.options.put(kv.k, kv.v) catch {};
+    return f;
+}
+
+test "resolveOutputPath: explicit --output wins verbatim" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "sess");
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const opts = cli.RegionOpts{ .target = "%5", .output = "/tmp/my-out.html", .open = false };
+    const path = try resolveOutputPath(alloc, opts, "%5", runner);
+    defer alloc.free(path);
+    // --output is returned verbatim (no dir join, no session/ts/pid).
+    try testing.expectEqualStrings("/tmp/my-out.html", path);
+}
+
+test "resolveOutputPath: auto-name under @tmux-2html-output-dir matches <session>-<ts>-<pid>.html" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{.{ .k = "@tmux-2html-output-dir", .v = "/tmp/t2h-out-region" }}, "mysess");
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const opts = cli.RegionOpts{ .target = "%5" }; // output null => auto-name
+    const path = try resolveOutputPath(alloc, opts, "%5", runner);
+    defer alloc.free(path);
+
+    // Expect: /tmp/t2h-out-region/mysess-<digits>-<digits>.html
+    try testing.expect(std.mem.startsWith(u8, path, "/tmp/t2h-out-region/mysess-"));
+    try testing.expect(std.mem.endsWith(u8, path, ".html"));
+    // The middle = <unixtime>-<pid> (both numeric). Slice off prefix + ".html".
+    const mid = path["/tmp/t2h-out-region/mysess-".len .. path.len - ".html".len];
+    var it = std.mem.splitScalar(u8, mid, '-');
+    const ts_s = it.next() orelse return error.MissingTimestamp;
+    const pid_s = it.next() orelse return error.MissingPid;
+    try testing.expect(it.next() == null); // exactly two components
+    _ = try std.fmt.parseInt(i64, ts_s, 10);
+    _ = try std.fmt.parseInt(i32, pid_s, 10);
+}
+
+test "resolveOutputPath: empty session falls back to 'pane'" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{.{ .k = "@tmux-2html-output-dir", .v = "/tmp/t2h-out-region2" }}, "");
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const opts = cli.RegionOpts{ .target = "%5" };
+    const path = try resolveOutputPath(alloc, opts, "%5", runner);
+    defer alloc.free(path);
+    // sanitizeFilename("") => "pane".
+    try testing.expect(std.mem.startsWith(u8, path, "/tmp/t2h-out-region2/pane-"));
+}
+
+test "writeLastOutput: writes the BARE path to <bin_dir>/.last-output (no prefix)" {
+    // Use a tmpDir as the bin_dir (dir-scoped => testable without a real bin dir).
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(bin_path);
+
+    try writeLastOutput(bin_path, "/some/output/selection.html");
+
+    // Read back <bin_path>/.last-output => equals the input BARE path (no "wrote" prefix).
+    const sidecar_path = try std.fs.path.join(testing.allocator, &.{ bin_path, ".last-output" });
+    defer testing.allocator.free(sidecar_path);
+    const got = try std.fs.cwd().readFileAlloc(testing.allocator, sidecar_path, 4096);
+    defer testing.allocator.free(got);
+    try testing.expectEqualStrings("/some/output/selection.html", got);
+}
+
+test "writeHtmlAtomic: writes bytes + target exists (read-back round-trip)" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(dir_path);
+    const target = try std.fs.path.join(testing.allocator, &.{ dir_path, "out.html" });
+    defer testing.allocator.free(target);
+
+    const payload = "<html><body>hello selection</body></html>";
+    try writeHtmlAtomic(testing.allocator, target, payload);
+
+    // Read back => equals input (proves the bytes landed + the rename completed).
+    const got = try std.fs.cwd().readFileAlloc(testing.allocator, target, 4096);
+    defer testing.allocator.free(got);
+    try testing.expectEqualStrings(payload, got);
+    // statFile succeeds (the rename completed => target exists).
+    _ = try std.fs.cwd().statFile(target);
+}
+
+test "readBoolOption: on/true/yes/1 => true; off/junk => false; empty/unset => default" {
+    // Helper: build a one-option fake + run readBoolOption + cleanup.
+    const check = struct {
+        fn run(val: []const u8, default: bool) bool {
+            var f = OptFake{ .options = std.StringHashMap([]const u8).init(testing.allocator) };
+            defer f.options.deinit();
+            f.options.put("@tmux-2html-open", val) catch {};
+            const runner: capture.Runner = .{ .ctx = @ptrCast(&f), .runFn = OptFake.run };
+            return readBoolOption(runner, testing.allocator, "@tmux-2html-open", default);
+        }
+    }.run;
+
+    try testing.expect(check("on", false));
+    try testing.expect(check("ON", false)); // case-insensitive
+    try testing.expect(check("true", false));
+    try testing.expect(check("yes", false));
+    try testing.expect(check("1", false));
+    try testing.expect(!check("off", false));
+    try testing.expect(!check("junk", false));
+    // empty value => default (true here).
+    try testing.expect(check("", true));
+}
+
+test "readBoolOption: unset option => default" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "sess"); // no @tmux-2html-open => unset
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    try testing.expect(readBoolOption(runner, alloc, "@tmux-2html-open", true)); // unset => default true
+}
+
+test "readFontOption: set => value; unset/empty => 'monospace'" {
+    const alloc = testing.allocator;
+
+    // set value => returned (trimmed)
+    {
+        var fake = optFake(&.{.{ .k = "@tmux-2html-font", .v = "Fira Code" }}, "sess");
+        defer fake.options.deinit();
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try testing.expectEqualStrings("Fira Code", font);
+    }
+    // unset => "monospace"
+    {
+        var fake = optFake(&.{}, "sess");
+        defer fake.options.deinit();
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try testing.expectEqualStrings("monospace", font);
+    }
+    // empty value => "monospace"
+    {
+        var fake = optFake(&.{.{ .k = "@tmux-2html-font", .v = "   " }}, "sess");
+        defer fake.options.deinit();
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try testing.expectEqualStrings("monospace", font);
+    }
+}
+
+test "regionPid: Linux => > 0; else >= 0" {
+    const pid = regionPid();
+    if (builtin.os.tag == .linux) {
+        try testing.expect(pid > 0); // getpid is always >= 1 on Linux
+    } else {
+        try testing.expect(pid >= 0); // non-Linux => 0 (regionPid's documented fallback)
+    }
+}
+
+test "selfBinDir: returns a non-empty dir (the test binary's dir)" {
+    const alloc = testing.allocator;
+    const dir = try selfBinDir(alloc);
+    defer alloc.free(dir);
+    try testing.expect(dir.len > 0); // the running test binary's directory
 }
