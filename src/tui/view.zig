@@ -325,10 +325,13 @@ pub fn highlight(gx: u32, gy: u32, sel: ?Selection, matches: []const Match) bool
 /// spacer-skip). Grapheme-trail codepoints share the SAME cell index.
 const DecodedRow = struct { text: []u8, col: []u16 };
 
+// P3.M3.T1.S1: `pub` so region.zig can pre-decode grid rows into motion.Row{ text, col }.
+// DecodedRow STAYS private (line 326) — Zig lets a pub fn return a private struct; callers
+// bind the result via type inference. Non-conflicting with the parallel P3.M2.T2.S2 (render.zig).
 /// Walk ONE grid row's cells into UTF-8 text + a per-byte cell-column map. Returns empty
 /// text/col for rows past the grid (`gy >= total_rows`) or rows that fail to pin. Terminal-
 /// needed (Screen walk). `total_rows` is the grid row count (the caller computes it once).
-fn decodeRow(
+pub fn decodeRow(
     alloc: std.mem.Allocator,
     grid: *const Screen,
     total_rows: u32,

@@ -6,6 +6,7 @@ const cli = @import("cli.zig");
 const palette = @import("palette.zig");
 const capture = @import("capture.zig");
 const render_mod = @import("render.zig");
+const region = @import("region.zig"); // P3.M3.T1.S1: region subcommand body (capture -> grid -> TUI)
 const tui = @import("tui/app.zig");
 
 const version_string = build_options.version;
@@ -109,7 +110,7 @@ fn dispatch(allocator: std.mem.Allocator, name: []const u8, sub_args: []const []
     } else if (std.mem.eql(u8, name, "pane")) {
         return cli.pane(allocator, sub_args, paneBody);
     } else if (std.mem.eql(u8, name, "region")) {
-        return cli.region(allocator, sub_args);
+        return cli.region(allocator, sub_args, region.body);
     } else if (std.mem.eql(u8, name, "sync-palette")) {
         return cli.syncPalette(allocator, sub_args, syncPaletteBody);
     }
@@ -503,15 +504,24 @@ test {
     // NOT exist yet). select.zig is PURE (no Terminal) ⇒ separate test fns (no cross-test
     // GOTCHA).
     _ = @import("tui/select.zig");
+    // P3.M3.T1.S1: keep region.zig tests reachable (regionPrepare FakeTmux tests). region
+    // is ALSO a top-level import (dispatch), so tests are doubly reachable; the explicit
+    // import follows the codebase convention. region.zig's regionPrepare is Terminal-free so
+    // it gets separate test fns (no cross-test GOTCHA); body/handle/repaint build a Terminal
+    // so they are compile-verified + manually smoke-tested, NOT unit-tested.
+    _ = @import("region.zig");
 }
 
-test "dispatch routes known subcommand to cli stub" {
-    // `render` is WIRED (P1.M3.T1.S1) and `pane` is WIRED (P2.M1.T2.S1) — both run real I/O
-    // (stdin / tmux / files), so they must NOT be driven from a unit test. Only `region` still
-    // reaches a NotImplemented stub. `sync-palette` runs queryColors against the REAL /dev/tty +
-    // writes the REAL cache — never drive it from a test.
+test "dispatch rejects unknown subcommand (body-pointer wiring regression guard)" {
+    // `render` is WIRED (P1.M3.T1.S1), `pane` is WIRED (P2.M1.T2.S1), and `region` is now
+    // WIRED (P3.M3.T1.S1) - all three run real I/O (stdin / tmux / files / tty), so they
+    // must NOT be driven from a unit test. `sync-palette` runs queryColors against the REAL
+    // /dev/tty + writes the REAL cache - never drive it from a test. This test only asserts
+    // the dispatch shape compiles + that an unknown subcommand still exits 1 (regression
+    // guard for the body-pointer wiring).
     const allocator = std.testing.allocator;
-    try std.testing.expectError(error.NotImplemented, dispatch(allocator, "region", &.{}));
+    const code = try dispatch(allocator, "no-such-subcommand", &.{});
+    try std.testing.expectEqual(@as(u8, 1), code);
 }
 
 test "version string is non-empty" {

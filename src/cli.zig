@@ -397,8 +397,11 @@ pub fn pane(
     return body(allocator, opts);
 }
 
-pub fn region(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
-    _ = allocator;
+pub fn region(
+    allocator: std.mem.Allocator,
+    args: []const []const u8,
+    body: *const fn (std.mem.Allocator, RegionOpts) anyerror!u8,
+) !u8 {
     if (hasHelpFlag(args)) {
         try write(std.fs.File.stdout(), region_help);
         return 0;
@@ -407,8 +410,7 @@ pub fn region(allocator: std.mem.Allocator, args: []const []const u8) !u8 {
         try reportError("region", err);
         return 1;
     };
-    _ = opts; // body lands in P3 (tui/ + region wiring).
-    return error.NotImplemented;
+    return body(allocator, opts);
 }
 
 pub fn syncPalette(
