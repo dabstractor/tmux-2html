@@ -22,7 +22,7 @@ ones you want to change.
 
 This document is the reference for configuring and using tmux-2html. It covers:
 
-- **Options** — the eight `@tmux-2html-*` tmux user options and their defaults.
+- **Options** — the ten `@tmux-2html-*` tmux user options and their defaults.
 - **The region overlay** — the interactive copy-mode TUI (`prefix C-o`): its
   movement keys, search, selection, confirm/cancel flow, and status line.
 - **Palette cache** — how your terminal palette is captured, cached, and consumed.
@@ -45,6 +45,8 @@ For installation and a feature overview, see the `README.md`.
 | `@tmux-2html-font` | `monospace` | CSS `font-family` used in the rendered HTML. |
 | `@tmux-2html-history-limit` | `50000` | Maximum number of scrollback lines captured per pane. |
 | `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory containing the `tmux-2html` binary. |
+| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html — <session>/<pane> <iso8601>` for `pane`/`region`; `tmux-2html` for `render`). |
+| `@tmux-2html-lang` | *(empty)* | `<html lang>` attribute (BCP-47 tag). Empty ⇒ locale-derived, fallback `en`. |
 
 > **`C-o` key-conflict note.** `C-o` is already used in the stock tmux prefix
 > table (bound to `rotate-window`; in some configs to a debug `display-message`).
@@ -59,6 +61,13 @@ For installation and a feature overview, see the `README.md`.
 > capture is unbound until you explicitly set it, e.g.
 > `set -g @tmux-2html-visible-key "v"`.
 
+### HTML output (§8.1)
+
+Every capture — `render`, `pane`, and `region` alike — is a **complete, valid HTML5 document**
+(`<!DOCTYPE html>` … `</html>`), never a bare `<pre>` fragment. The document's `<title>` and
+`<html lang>` come from `@tmux-2html-title` and `@tmux-2html-lang`: set them and every generated
+page reflects them; leave them empty for the contextual title and locale-derived language.
+
 ## How options are read
 
 The loader reads each option with `tmux show-option -gqv @tmux-2html-<name>`. An
@@ -71,6 +80,11 @@ themselves at runtime via `tmux show-option`, so you do not pass them on the
 command line — setting the option in `~/.tmux.conf` is enough. The loader
 exports the resolved values only to drive key-resolution and the sibling binding
 and auto-sync tasks; they are not propagated to `run-shell` children.
+
+The `@tmux-2html-title` and `@tmux-2html-lang` options are the exception: the plugin bakes them
+into the key bindings as `--title`/`--lang` flags (above), so the binary receives them directly
+rather than re-reading them. You can also pass `--title`/`--lang` yourself when running the
+binary standalone.
 
 ## The region overlay
 

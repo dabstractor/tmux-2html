@@ -101,6 +101,23 @@ binary_dir=$TMUX_2HTML_BIN
 
 export full_key region_key visible_key open font history_limit output_dir binary_dir
 
+# §8.1 HTML envelope knobs (P1.M1.T2.S1): document <title> + <html lang>. Empty default
+# ⇒ the binary uses its own default (contextual title / locale-or-"en" lang). Unlike
+# font/output-dir/open/history-limit (which the binary re-reads via show-option), these
+# are THREADED into the bindings below as --title/--lang flags (the binary accepts both
+# since P1.M1.T1.S1).
+title_opt=$(read_opt @tmux-2html-title "")
+lang_opt=$(read_opt @tmux-2html-lang "")
+# NOW-expanded optional fragments (mirrors the $TMUX_2HTML_BIN interpolation: exported
+# vars don't reach run-shell children, so bake them in at source time). Empty option ⇒
+# empty fragment ⇒ binary default. Single-quoted so a spaced value survives run-shell's
+# /bin/sh re-parse at fire time.
+title_arg=""
+[ -n "$title_opt" ] && title_arg="--title '$title_opt'"
+lang_arg=""
+[ -n "$lang_opt" ] && lang_arg="--lang '$lang_opt'"
+export title_opt lang_opt title_arg lang_arg
+
 # ----------------------------------------------------------------------
 # §4  Optional test seam (harmless when unset; makes integration tests assertable)
 # ----------------------------------------------------------------------
@@ -117,6 +134,10 @@ if [ -n "${TMUX_2HTML_DEBUG:-}" ]; then
         printf 'font=%s\n'            "$font"
         printf 'history_limit=%s\n'   "$history_limit"
         printf 'binary_dir=%s\n'      "$binary_dir"
+        printf 'title_opt=%s\n'       "$title_opt"
+        printf 'lang_opt=%s\n'        "$lang_opt"
+        printf 'title_arg=%s\n'       "$title_arg"
+        printf 'lang_arg=%s\n'        "$lang_arg"
     } > "$TMUX_2HTML_DEBUG"
 fi
 
@@ -136,13 +157,13 @@ fi
 # Quoting: $TMUX_2HTML_BIN expanded NOW; #{pane_id} stored literally (run-shell
 # expands it); \$(…)/\"/\$out escaped so run-shell's /bin/sh runs them at fire time.
 [ "$binary_ready" = 1 ] && tmux bind-key "$full_key" run-shell \
-    "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --full --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
+    "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --full $title_arg $lang_arg --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
 
 # Visible (only if @tmux-2html-visible-key is set; empty default ⇒ unbound,
 # PRD §9.2/§9.3).
 if [ -n "$visible_key" ]; then
     [ "$binary_ready" = 1 ] && tmux bind-key "$visible_key" run-shell \
-        "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --visible --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
+        "out=\$(\"$TMUX_2HTML_BIN/tmux-2html\" pane --visible $title_arg $lang_arg --target '#{pane_id}' 2>/dev/null); tmux display-message \"tmux-2html: \$out\""
 fi
 
 # Optional test seam (APPEND with >>; §4 already wrote with > and runs first
@@ -181,7 +202,7 @@ fi
 # inside display-message's double-quoted arg. The trailing if…fi returns 0
 # (cancel is silent).
 [ "$binary_ready" = 1 ] && tmux bind-key "$region_key" run-shell \
-    "last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\$last\"; tmux display-popup -E -w 100% -h 100% \"$TMUX_2HTML_BIN/tmux-2html region --target '#{pane_id}'\"; if [ -f \"\$last\" ]; then out=\$(cat \"\$last\"); tmux display-message \"tmux-2html: wrote \$out\"; fi"
+    "last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\$last\"; tmux display-popup -E -w 100% -h 100% \"$TMUX_2HTML_BIN/tmux-2html region $title_arg $lang_arg --target '#{pane_id}'\"; if [ -f \"\$last\" ]; then out=\$(cat \"\$last\"); tmux display-message \"tmux-2html: wrote \$out\"; fi"
 
 # Optional test seam (APPEND with >>; §4 already wrote with > and runs first
 # in file order). Records the region binding decision for deterministic tests.

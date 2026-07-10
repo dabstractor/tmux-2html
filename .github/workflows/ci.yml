@@ -72,3 +72,19 @@ jobs:
           zig build test -Doptimize=ReleaseFast
         env:
           ZIG_HTTP_MAX_CONNS: "1"
+
+  # Plugin option threading test (P1.M1.T2.S1). A separate, dependency-free job: it sources
+  # tmux-2html.tmux under a MOCKED `tmux()` shell function (never a real tmux binary/socket —
+  # PRD §0-safe) and asserts the §8.1 options @tmux-2html-title/@tmux-2html-lang thread into all
+  # three prefix-table bindings as --title/--lang before --target. Pure POSIX sh, no Zig, no
+  # deps, runs on linux only (the loader + mock are shell; macOS dash/bash behave identically
+  # and the Zig matrix already covers cross-OS). A regression here fails CI.
+  plugin:
+    name: plugin options (sh)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Plugin option threading test (mocked tmux; no tmux required)
+        run: sh tests/plugin_options.sh

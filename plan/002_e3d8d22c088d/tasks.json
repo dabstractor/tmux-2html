@@ -90,14 +90,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Plugin options @tmux-2html-title / @tmux-2html-lang + prefix-table bindings",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Expose the §8.1 title/lang configurability at the tmux layer: read @tmux-2html-title and @tmux-2html-lang user options and thread them as --title/--lang into the O / visible / C-o region prefix bindings. Empty/unset ⇒ omit the flag so the binary computes its default (contextual title for pane/region, locale lang). Requires P1.M1.T1 (--title/--lang flags to exist).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Read @tmux-2html-title/@tmux-2html-lang in tmux-2html.tmux and thread into bindings",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -117,14 +117,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "Validate §8.1 end-to-end: goldens unchanged + title/lang tests + isolated-tmux integration",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Prove the §8.1 delta is complete and correct: the existing renderer goldens remain byte-identical (the core envelope + re-blessed docs already pass), the new --title/--lang behavior is covered by tests, and an isolated-tmux integration smoke confirms render (stdout/--output/--open/--selection), pane (--visible/--full), and region confirm all emit COMPLETE documents with the expected title/lang/page-bg and NO bare fragment anywhere. Honors PRD §0 (isolated, uniquely-named tmux server only).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "Goldens-unchanged check + --title/--lang tests + isolated-tmux output-path smoke",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
