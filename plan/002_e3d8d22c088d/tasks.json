@@ -1,0 +1,128 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "Complete §8.1 — HTML Document Envelope Configurability & Validation",
+      "status": "Ready",
+      "description": "DELTA PLAN (PRD v1 → v2). The PRD added §8.1 'HTML document envelope': every HTML output must be a complete, valid HTML5 document (<!DOCTYPE html>…</html>), never a bare <pre> fragment. The CORE envelope is ALREADY implemented & tested in commit 07ab167 (render.zig DocumentOpts/writeDocument/renderDocument; all render/pane/region output paths route through it; testdata/*.html re-blessed as complete docs; golden_test asserts the full document byte-for-byte — verified: build ✅, test ✅, runtime smoke ✅, no production path emits a bare fragment). This phase closes §8.1's REMAINING normative gaps: the title/lang CONFIGURABILITY that §8.1 normatively requires (--title / @tmux-2html-title override; @tmux-2html-lang / locale-derived lang), then validates end-to-end and syncs docs. Do NOT re-implement the existing core envelope (see plan/002_e3d8d22c088d/architecture/system_context.md + envelope_gap_analysis.md).",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "§8.1 Configurability, Validation & Documentation",
+          "status": "Planned",
+          "description": "Land the §8.1 normative configurability (title override + lang resolution), wire it through the binary and the tmux plugin, validate the full document holds across every output path (goldens unchanged + isolated-tmux integration, PRD §0 safety), and sync changeset-level docs.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "--title / --lang CLI flags, locale lang resolution, and binary plumbing",
+              "status": "Planned",
+              "description": "Add the §8.1 title/lang override surface to the binary subcommands (render/pane/region) and a pure locale→BCP-47 lang resolver. DocumentOpts already has `title` and `lang` (default 'en') fields — this task only adds the CLI entry points and the resolver, then wires them into the DocumentOpts that each subcommand already builds. Default behavior MUST be unchanged when no flag/locale is present (render title 'tmux-2html', lang 'en').",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "Add --title and --lang flags to cli.zig (render/pane/region)",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.8/h3.13", "h2.5/h3.2", "h2.5/h3.3", "h2.5/h3.4", "h2.1/h3.0"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: see plan/002_e3d8d22c088d/architecture/envelope_gap_analysis.md §G1/G3. RenderOpts/PaneOpts/RegionOpts are at src/cli.zig:59/70/81; parsers parseRender/parsePane/parseRegion at src/cli.zig:153/184/216 use `parg.parseSlice` + `flag.isLong(\"name\")` + `requireValue(&parser)` (mirror the existing `--font` branch).\n2. INPUT: none (leaf subtask). PRD §8.1 normative: title 'Configurable via `--title`'; lang 'default `en`; configurable via `@tmux-2html-lang` / locale' (the binary `--lang` flag is the threading surface for the tmux option).\n3. LOGIC: Add `title: ?[]const u8 = null` and `lang: ?[]const u8 = null` to RenderOpts, PaneOpts, AND RegionOpts. In each of parseRender/parsePane/parseRegion add two `} else if (flag.isLong(\"title\")) { opts.title = try requireValue(&parser); }` and `} else if (flag.isLong(\"lang\")) { opts.lang = try requireValue(&parser); }` branches BEFORE the `else => return error.UnknownFlag`. Implement PRD §5.1–§5.3. Keep `--title`/`--lang` OFF sync-palette (it emits no HTML). Follow TDD: parse round-trips in cli.zig unit tests.\n4. OUTPUT: the three Opts structs gain nullable title/lang; parsers accept the flags; returns ParseError on bad usage as today. Consumed by S3/S4 and P1.M1.T2 (plugin passes these flags).\n5. DOCS: [Mode A] Update the per-subcommand `--help` usage text in src/main.zig (the render/pane/region usage blocks) to list `--title TITLE` and `--lang LANG` (one line each), since this subtask adds that CLI surface. No separate docs subtask."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S2",
+                  "title": "Pure locale→BCP-47 lang resolver (langFromEnv / resolveLang) + unit tests",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [],
+                  "prd_selectors": ["h2.8/h3.13", "h2.6"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: see plan/002_e3d8d22c088d/architecture/lang_resolution.md for the full algorithm + sources (POSIX/glibc/RFC 5646 BCP 47 / WHATWG HTML / MDN). Precedence: `@tmux-2html-lang`/`--lang` explicit → locale (LC_ALL→LC_MESSAGES→LANG) → 'en'. Build is `.link_libc=false`; read env via `std.posix.getenv` (already used in render.zig for TMPDIR).\n2. INPUT: an optional explicit `?[]const u8` lang (from --lang / @tmux-2html-lang) plus the process env.\n3. LOGIC: Implement in src/render.zig (next to DocumentOpts). Make the core PURE & deterministic for testing: a `fn toBcp47(locale: []const u8) ?[]const u8` (strip `.codeset`/`@modifier`, `_`→`-`, lower lang / UPPER region, reject C/POSIX/empty/`^[a-z]{2,3}(-[A-Z]{2})?$` failures → null) and a `fn langFromEnvStrings(lc_all, lc_messages, lang: ?[]const u8) []const u8` precedence resolver returning 'en' fallback. Public `pub fn langFromEnv() []const u8` calls the strings fn with `std.posix.getenv` values; `pub fn resolveLang(explicit: ?[]const u8) []const u8` = `if (explicit) |e| (toBcp47(e) orelse \"en\") else langFromEnv()`. NO /dev/tty. Prefer no allocation (env strings are mutable process memory; in-place normalization of the returned slice is acceptable, else a small stack buffer). TDD: en_US.UTF-8→en-US; pt_BR.UTF-8→pt-BR; de_DE@euro→de-DE; zh_CN→zh-CN; C/POSIX/C.UTF-8→en; unset→en; explicit invalid→en; explicit wins over locale.\n4. OUTPUT: `resolveLang(opts.lang) []const u8` consumed by S3 (render.run) and S4 (pane/region) to set DocumentOpts.lang.\n5. DOCS: none — internal helper, no user-facing/config/API surface change."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S3",
+                  "title": "render.run wires resolved title + lang into DocumentOpts",
+                  "status": "Planned",
+                  "story_points": 0.5,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2"],
+                  "prd_selectors": ["h2.8/h3.13", "h2.5/h3.2"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: render.zig:636 currently builds `const doc = DocumentOpts{ .title = \"tmux-2html\", .background = colors.background };` (lang ⇒ default \"en\"). scout confirmed ALL FOUR arms of run (--output/--open/stdout/--selection) reuse this single `doc`. DocumentOpts (render.zig:187) already has `lang: []const u8 = \"en\"`.\n2. INPUT: opts.title: ?[]const u8 and opts.lang: ?[]const u8 from S1; resolveLang/ from S2.\n3. LOGIC: At render.zig:636 compute `const title = opts.title orelse \"tmux-2html\";` and `const lang = resolveLang(opts.lang);` then `const doc = DocumentOpts{ .title = title, .lang = lang, .background = colors.background };`. No other change — the four arms already use `doc`. CRITICAL INVARIANT: golden_test.zig calls renderDocument DIRECTLY (bypassing run) with DocumentOpts.title=\"tmux-2html\"/lang=\"en\"(default), so this CLI change CANNOT alter golden bytes — verify by running `zig build test --release=fast` and confirming the two golden tests still pass byte-equal.\n4. OUTPUT: `render --title X --lang Y` (and locale default) emits `<html lang=\"Y-or-locale\">` and `<title>X</title>` in a complete document. Consumed/verified by P1.M1.T3.\n5. DOCS: none here — the --help text is owned by S1."
+                },
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S4",
+                  "title": "pane (main.zig) and region (region.zig) honor --title override + --lang",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2"],
+                  "prd_selectors": ["h2.8/h3.13", "h2.5/h3.3", "h2.5/h3.4", "h2.6"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: pane path main.zig:463 `const title = paneTitle(allocator, runner, target) catch try allocator.dupe(u8, \"tmux-2html\");` then renderToFileAtomic(... DocumentOpts{ .title = title, .background = colors.background }). region path region.zig:459 `const title = regionTitle(...) catch try allocator.dupe(u8, \"tmux-2html\");` then region.zig:546 render.writeDocumentBytes(... DocumentOpts{ .title = title, .background = ctx.colors.background }). Both currently omit `.lang` (⇒ \"en\").\n2. INPUT: opts.title: ?[]const u8 and opts.lang: ?[]const u8 from S1; resolveLang from S2.\n3. LOGIC: For BOTH pane and region: when `opts.title` is non-null it OVERRIDES the computed contextual title — e.g. pane: `const title = if (opts.title) |t| (try allocator.dupe(u8, t)) else (paneTitle(allocator, runner, target) catch try allocator.dupe(u8, \"tmux-2html\"));` (preserve the existing defer free + fallback). Add `.lang = resolveLang(opts.lang)` to BOTH DocumentOpts literals. Mock: capture.Runner is already injectable (existing paneTitle/regionTitle unit tests use a fake runner) — keep title-override tests unit-level via the existing test harness; the binary `pane --title`/`region` are integration-checked in P1.M1.T3.\n4. OUTPUT: `pane --title X --lang Y` / `region --title X --lang Y` emit `<title>X</title>` (X wins over the session/pane/timestamp default) and `<html lang=\"Y-or-locale\">` in a complete document. Default (no flags) byte-identical to today.\n5. DOCS: none here — --help owned by S1; plugin/config owned by P1.M1.T2."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T2",
+              "title": "Plugin options @tmux-2html-title / @tmux-2html-lang + prefix-table bindings",
+              "status": "Planned",
+              "description": "Expose the §8.1 title/lang configurability at the tmux layer: read @tmux-2html-title and @tmux-2html-lang user options and thread them as --title/--lang into the O / visible / C-o region prefix bindings. Empty/unset ⇒ omit the flag so the binary computes its default (contextual title for pane/region, locale lang). Requires P1.M1.T1 (--title/--lang flags to exist).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S1",
+                  "title": "Read @tmux-2html-title/@tmux-2html-lang in tmux-2html.tmux and thread into bindings",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1"],
+                  "prd_selectors": ["h2.8/h3.13", "h2.9/h3.15", "h2.9/h3.16", "h2.5/h3.3", "h2.5/h3.4"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: tmux-2html.tmux reads the 8 §9.2 options via read_opt (§60, e.g. `font=$(read_opt @tmux-2html-font monospace)`). The prefix bindings (§100-170) expand `$TMUX_2HTML_BIN` NOW and leave `#{pane_id}` literal for run-shell; C-o region wraps `tmux display-popup -E -w 100% -h 100% \"$BIN/tmux-2html region --target #{pane_id}\"`. The `TMUX_2HTML_DEBUG` seam (§4) records option/binding decisions for deterministic plugin tests.\n2. INPUT: P1.M1.T1.S1 (the binary now accepts --title/--lang).\n3. LOGIC: In the options block add `title_opt=$(read_opt @tmux-2html-title \"\")` and `lang_opt=$(read_opt @tmux-2html-lang \"\")`. Build optional NOW-expanded fragments (mirrors the $TMUX_2HTML_BIN pattern): `title_arg=\"\"; [ -n \"$title_opt\" ] && title_arg=\"--title '$title_opt'\"` and the same for `lang_arg`. Interpolate `$title_arg $lang_arg` bare into ALL THREE binding command strings (O full, visible if set, C-o region popup) BEFORE `--target '#{pane_id}'`. Single-quote values to survive spaces. Empty ⇒ the arg fragment is empty ⇒ the binary uses its default (no behavior change). Append `title_opt`/`lang_opt`/`title_arg`/`lang_arg` to the TMUX_2HTML_DEBUG seam. TDD: extend the existing plugin test harness (it sources tmux-2html.tmux against a mocked tmux) to assert (a) defaults ⇒ no --title/--lang in the bound command, (b) set options ⇒ --title/--lang present. NEVER touch the user's running tmux (PRD §0): plugin tests use a uniquely-named socket / mock, never the global one.\n4. OUTPUT: `set -g @tmux-2html-title 'My Pane'` / `set -g @tmux-2html-lang pt-BR` flow through the bindings into the binary. Verified by P1.M1.T3 integration.\n5. DOCS: [Mode A] Update docs/CONFIGURATION.md: add `@tmux-2html-title` (default: empty ⇒ contextual 'tmux-2html — <session>/<pane> <iso8601>') and `@tmux-2html-lang` (default: empty ⇒ locale-derived, fallback 'en') rows to the §9.2 options table, and a one-paragraph 'HTML output (§8.1)' note that every capture is a complete HTML5 document whose `<title>`/`lang` are these knobs. No separate docs subtask for this file."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T3",
+              "title": "Validate §8.1 end-to-end: goldens unchanged + title/lang tests + isolated-tmux integration",
+              "status": "Planned",
+              "description": "Prove the §8.1 delta is complete and correct: the existing renderer goldens remain byte-identical (the core envelope + re-blessed docs already pass), the new --title/--lang behavior is covered by tests, and an isolated-tmux integration smoke confirms render (stdout/--output/--open/--selection), pane (--visible/--full), and region confirm all emit COMPLETE documents with the expected title/lang/page-bg and NO bare fragment anywhere. Honors PRD §0 (isolated, uniquely-named tmux server only).",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T3.S1",
+                  "title": "Goldens-unchanged check + --title/--lang tests + isolated-tmux output-path smoke",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2", "P1.M1.T1.S3", "P1.M1.T1.S4", "P1.M1.T2.S1"],
+                  "prd_selectors": ["h2.8/h3.13", "h2.15", "h2.0", "h2.5/h3.2", "h2.5/h3.3", "h2.5/h3.4", "h2.6", "h2.13"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: PRD §15 — goldens assert the FULL document byte-for-byte (golden_test.zig already calls renderDocument). PRD §0 — integration MUST use its own isolated server: `tmux -L \"tmux-2html-test-$$\" new-session -d -s test -x 80 -y 10` … `tmux -L \"...\" kill-session -t test`; NEVER `tmux kill-server`/`killall tmux`/`pkill tmux`/the user's socket. The §8.1 normative doc shape: starts `<!DOCTYPE html>`, single `<html lang=…>`, `<meta charset=\"utf-8\">` FIRST in head, viewport present, escaped `<title>`, `<body>` wraps one `<pre>`, page bg = terminal bg, ends `</html>`.\n2. INPUT: the implemented --title/--lang (P1.M1.T1) and plugin options (P1.M1.T2). Build artifact: ./zig-out/bin/tmux-2html (release=fast).\n3. LOGIC: (a) `zig build test --release=fast` — confirm BOTH golden tests still pass byte-equal (proves the core envelope + re-blessed docs are intact and the CLI/lang changes didn't regress). (b) Add focused tests: cli.zig parse --title/--lang round-trips (T1.S1), lang resolver cases (T1.S2), and assert render.run/pane/region build DocumentOpts with the resolved title/lang (extend existing main.zig paneTitle / region.zig regionTitle tests for the override branch). (c) Integration smoke against an ISOLATED tmux server (per §0): emit colored ANSI, then assert each path's output is a COMPLETE document — `render` (stdout, --output, --open→temp, --selection linewise+block), `pane` (--visible, --full), and `region` confirm (programmatic) — checking: starts with `<!DOCTYPE html>`, contains `<html lang=`, `<meta charset=\"utf-8\">`, `</html>`, the `<pre class=\"term2html-output\"`, expected color span, and that NO path is a bare fragment. For --title: assert the title text appears escaped; for --lang: assert the lang attribute equals the passed value, and under a forced-empty/C locale assert `lang=\"en\"` (control env so the assertion is deterministic). Mock: the binary's tmux calls go to the isolated socket via $TMUX/-L; xdg-open is best-effort (ignore).\n4. OUTPUT: a green `zig build test --release=fast` plus a passing integration run; evidence that every output path emits a complete §8.1 document with correct title/lang/bg and zero bare fragments. This is the §8.1 'done' gate.\n5. DOCS: none — validation only (no user-facing/config/API surface change beyond what T1/T2 already documented)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T4",
+              "title": "Sync changeset-level documentation (README overview)",
+              "status": "Planned",
+              "description": "Mode B final task: sweep the changeset-level overview doc (README.md) so the §8.1 delta ships with a coherent, non-stale feature description. Per-file touched docs (--help, CONFIGURATION options) already rode with the implementing subtasks (P1.M1.T1.S1, P1.M1.T2.S1). This task depends on ALL implementing subtasks and runs last.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T4.S1",
+                  "title": "README.md: surface standalone complete-HTML5-document output + title/lang config",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": ["P1.M1.T1.S1", "P1.M1.T1.S2", "P1.M1.T1.S3", "P1.M1.T1.S4", "P1.M1.T2.S1", "P1.M1.T3.S1"],
+                  "prd_selectors": ["h2.8/h3.13", "h2.1/h3.0", "h2.9/h3.15", "h2.5/h3.2", "h2.5/h3.3", "h2.5/h3.4"],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: README.md line 3 already says 'Capture a tmux pane to a standalone, color-faithful HTML document.' — consistent with §8.1 but it does NOT describe the complete-document guarantee (DOCTYPE/charset/viewport/title/page-bg), the --title/@tmux-2html-title title override, or the lang (@tmux-2html-lang / locale) configurability. docs/CONFIGURATION.md is handled by P1.M1.T2.S1 (do not duplicate).\n2. INPUT: the implemented §8.1 surface from P1.M1.T1 (--title/--lang, locale lang) and P1.M1.T2 (@tmux-2html-title/@tmux-2html-lang).\n3. LOGIC: Update README.md only. In the Features/Overview section, state that every capture is a complete, valid HTML5 document (single <!DOCTYPE html>…</html>, charset/viewport, HTML-escaped contextual title, page background = terminal background). In Usage/Configuration, document the title knob (--title CLI; @tmux-2html-title option; default contextual 'tmux-2html — <session>/<pane> <iso8601>' for pane/region, 'tmux-2html' for render) and the lang knob (@tmux-2html-lang / locale-derived, default 'en'). Keep it concise and accurate to the implemented behavior; cross-link docs/CONFIGURATION.md for the full options table. Do NOT invent flags/options not implemented by P1.M1.T1/T2.\n4. OUTPUT: a README whose output/config description matches the shipped §8.1 behavior (no stale 'fragment' language; new title/lang knobs surfaced).\n5. DOCS: this IS the changeset-level docs sync (Mode B). The per-file docs (--help in main.zig, CONFIGURATION.md options) were handled by the implementing subtasks."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
