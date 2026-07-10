@@ -1,0 +1,110 @@
+name: release
+
+# Builds 4 prebuilt tmux-2html binaries (linux/macos × x86_64/aarch64), packages each as
+# tmux-2html-<triple>.tar.xz, generates ONE consolidated SHA256SUMS.txt, and uploads all
+# assets to a DRAFT GitHub release. A human reviews + Publishes; only then does
+# scripts/download.sh's /releases/latest/download/ URL resolve (drafts are invisible to
+# `latest` until promoted — intentional gate). PRD §10/§11.
+
+on:
+  workflow_dispatch:        # lets you test the build matrix without cutting a tag
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write           # REQUIRED for softprops/action-gh-release to create the release + upload assets
+
+jobs:
+  build:
+    name: tmux-2html-${{ matrix.triple }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false      # one target failing must NOT cancel the other 3
+      matrix:
+        include:
+          # PRD-triple (asset/artifact name) | Zig -Dtarget            | runner         | -Dsimd=false
+          - { triple: linux-x86_64,  os: ubuntu-latest, target: x86_64-linux-gnu,  flags: ""              }
+          - { triple: linux-aarch64, os: ubuntu-latest, target: aarch64-linux-gnu, flags: "-Dsimd=false" }
+          - { triple: macos-x86_64,  os: macos-latest,  target: x86_64-macos,      flags: "-Dsimd=false" }
+          - { triple: macos-arm64,   os: macos-latest,  target: aarch64-macos,     flags: ""              }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Build
+        # --fetch pre-populates the global zig cache (fails fast on dep-download errors);
+        # the build then compiles ReleaseFast for the target. ZIG_HTTP_MAX_CONNS=1 caps the
+        # package manager's concurrent HTTP connections to avoid GitHub rate-limiting while
+        # fetching ghostty + its ~25 transitive C++ SIMD sub-deps from github.com.
+        run: |
+          zig build --fetch
+          zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }} ${{ matrix.flags }}
+        env:
+          ZIG_HTTP_MAX_CONNS: "1"
+
+      - name: Package
+        # Binary lands at zig-out/bin/tmux-2html (NOT target-suffixed) — copy into a clean
+        # staging dir, then tar.xz the bare 'tmux-2html' so the tarball's top-level entry
+        # IS 'tmux-2html' (what download.sh extracts + chmods). -cJf = xz; macOS bsdtar
+        # supports -J natively (libarchive). The exec bit is preserved by cp + tar.
+        run: |
+          mkdir -p dist
+          cp zig-out/bin/tmux-2html dist/
+          tar -C dist -cJf tmux-2html-${{ matrix.triple }}.tar.xz tmux-2html
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmux-2html-${{ matrix.triple }}   # MUST be unique per matrix job (v4 rule)
+          path: tmux-2html-${{ matrix.triple }}.tar.xz
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: build
+    # Only create the draft on a real tag push (a workflow_dispatch on a branch runs ONLY
+    # the build matrix, so you can test packaging without publishing).
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts (flattened)
+        # download-artifact@v4 nests each artifact in path/<name>/ by default; merge-multiple
+        # + pattern FLATTENS all 4 tarballs into assets/ (unique filenames ⇒ no collision).
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: tmux-2html-*
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        # ONE consolidated file, 4 lines (standard sha256sum format: <64-hex>  <basename>).
+        # download.sh greps this for the requested tarball basename. sort -k2 → deterministic
+        # alphabetical order regardless of glob/locale expansion.
+        working-directory: assets
+        run: |
+          sha256sum tmux-2html-*.tar.xz | sort -k2 > SHA256SUMS.txt
+          echo "=== SHA256SUMS.txt ==="
+          cat SHA256SUMS.txt
+
+      - name: Create draft release
+        # draft:true → a human must Publish in the GitHub UI before /releases/latest/download/
+        # resolves to these assets (intentional gate; download.sh 404s on drafts). tag is
+        # auto-detected from github.ref (refs/tags/vX.Y.Z) — no tag_name needed. Asset NAME on
+        # the release = each file's BASENAME. fail_on_unmatched_files → loud failure if a
+        # tarball/sums file is missing.
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            assets/tmux-2html-*.tar.xz
+            assets/SHA256SUMS.txt

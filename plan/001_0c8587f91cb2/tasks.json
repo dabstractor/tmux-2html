@@ -822,21 +822,21 @@
           "type": "Milestone",
           "id": "P4.M1",
           "title": "CI Release Pipeline",
-          "status": "Planned",
+          "status": "Researching",
           "description": "The .github/workflows/release.yml matrix that builds, packages (tar.xz + SHA256SUMS), and drafts the release consumed by scripts/download.sh.",
           "tasks": [
             {
               "type": "Task",
               "id": "P4.M1.T1",
               "title": "release.yml: 4-target build matrix + packaging + draft release",
-              "status": "Planned",
+              "status": "Researching",
               "description": "linux/macos × x86_64/aarch64 builds, tar.xz + SHA256SUMS, upload to release.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P4.M1.T1.S1",
                   "title": "4-target matrix build + tar.xz + SHA256SUMS + draft release",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S2",
@@ -852,7 +852,7 @@
                   "type": "Subtask",
                   "id": "P4.M1.T1.S2",
                   "title": "CI test job (ReleaseFast) — run golden + unit tests",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M4.T2.S1"
