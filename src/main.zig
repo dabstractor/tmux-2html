@@ -499,6 +499,10 @@ test {
     // NOT exist yet). motion.zig is PURE (no Terminal) ⇒ separate test fns (no cross-test
     // GOTCHA).
     _ = @import("tui/motion.zig");
+    // P3.M2.T2.S1: keep tui/select.zig tests reachable (region.zig, its caller, does
+    // NOT exist yet). select.zig is PURE (no Terminal) ⇒ separate test fns (no cross-test
+    // GOTCHA).
+    _ = @import("tui/select.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {
