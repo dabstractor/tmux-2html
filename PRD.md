@@ -75,6 +75,10 @@ selection UI, and ANSI→HTML rendering (reusing the Ghostty VT engine).
 - Real terminal palette fidelity (term2html-equivalent), via a cached palette so
   it works inside tmux bindings where no controlling terminal exists.
 - Installable via TPM with zero manual binary steps for end users.
+- Every output is a **complete, valid HTML5 document** — it begins with
+  `<!DOCTYPE html>`, has a single `<html>` root, a `<head>` (charset, viewport,
+  title), and a `<body>` wrapping the rendered terminal. Never a bare fragment;
+  see §8.1 ("no cutting corners on the HTML doc").
 
 ### 1.2 Non-goals (v1)
 - Replacing tmux's built-in copy mode for yanking text.
@@ -173,7 +177,7 @@ tmux-2html/
 Name: `tmux-2html`. Exit codes: `0` success, `1` usage/runtime error, `2`
 capture/target error. `--help` on every subcommand.
 
-### 5.1 `tmux-2html render` — core renderer (stdin → HTML)
+### 5.1 `tmux-2html render` — core renderer (stdin → complete HTML5 document)
 Reads ANSI from stdin, writes HTML. Used directly for piping and by other
 subcommands internally.
 ```
@@ -313,10 +317,70 @@ Pipeline:
 3. Resolve palette per §6 precedence.
 4. Build `ScreenFormatter` with `background/foreground/palette/font`; set
    `content.selection` (whole grid = `null`, or the user's selection).
-5. Emit HTML to stdout/`--output`; `--open` launches `xdg-open`.
+5. Emit a **complete HTML5 document** (§8.1) wrapping the rendered `<pre>` to
+   stdout/`--output`; `--open` launches `xdg-open`.
 
 All color classes are handled by ghostty-vt: 16 (palette lookup), 256,
 truecolor (exact RGB), attributes, and OSC 8 hyperlinks. No bespoke ANSI parser.
+
+### 8.1 HTML document envelope (normative — "no cutting corners")
+
+Every HTML output — from `render`, `pane`, and `region`, **including the
+`--selection` and TUI-confirm paths** — MUST be a complete, valid HTML5
+document, never a fragment. The absorbed term2html `ScreenFormatter` emits only
+the terminal `<pre>` fragment; `render.zig` (or a shared envelope helper)
+wraps that fragment in the full document below before writing to
+stdout/`--output`. This is the difference between "a `<pre>` blob" and "a
+standalone HTML document you can open, share, and trust in any browser."
+
+Required skeleton, in this exact order:
+
+```html
+<!DOCTYPE html>
+<html lang="<lang>">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><title></title>
+    <style> /* optional: body margin reset; page bg = terminal bg */ </style>
+  </head>
+  <body>
+    <pre class="term2html-output" …>…rendered cells…</pre>
+  </body>
+</html>
+```
+
+Normative requirements:
+- **`<!DOCTYPE html>`** is always the first bytes emitted (declares HTML5).
+- **`<html>`** is the single root element, carrying a `lang` attribute
+  (default `en`; configurable via `@tmux-2html-lang` / locale).
+- **`<head>`** contains, at minimum:
+  - `<meta charset="utf-8">` — **mandatory and first inside `<head>`**.
+    Terminal output is arbitrary Unicode; without an explicit charset the
+    browser's encoding sniff can mojibake it. Per the HTML spec the charset
+    declaration must appear within the first 1024 bytes, so it precedes
+    everything else in `<head>`.
+  - `<meta name="viewport" content="width=device-width, initial-scale=1">` —
+    so the page reflows readably at any width / on mobile, not just a wide
+    desktop window.
+  - `<title>` — a meaningful, **HTML-escaped** title. Default form:
+    `tmux-2html — <session>/<window>.<pane> <iso8601>` for `pane`/`region`;
+    `tmux-2html` (or `--title`) for `render` from stdin. Configurable via
+    `--title` / `@tmux-2html-title`.
+- **`<body>`** wraps exactly one `<pre>` (the formatter output). The **page
+  background matches the resolved terminal background color** (§6) so the
+  terminal block does not sit inside a white margin, and default body margin is
+  `0` (the `<pre>` owns its own box/padding).
+- All text inserted into the envelope (`<title>`, etc.) is HTML-escaped; cell
+  text escaping continues to be handled by ghostty-vt as today.
+- **No output path emits a bare fragment.** A fragment-only mode (for embedding
+  the `<pre>` inside another page) is explicitly out of scope for v1 (see §16);
+  the only v1 behavior is a full document.
+
+Verification: the §15 renderer golden tests assert the **full document**
+byte-for-byte (`<!DOCTYPE html>` → `</html>`), not just the `<pre>`. The
+committed `testdata/*.html` are bare fragments inherited from term2html and
+MUST be re-blessed as complete documents when this is implemented.
 
 ## 9. tmux plugin
 
@@ -416,6 +480,9 @@ Platform triples: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`,
 - **Renderer golden tests:** `testdata/*.ansi` → compare `*.html` byte-for-byte
   (extend term2html's existing test harness); cases for 16/256/truecolor,
   attributes, OSC 8, and **selection sub-rectangles** (linewise + block).
+  Goldens assert the **full HTML document** (§8.1: `<!DOCTYPE html>` →
+  `</html>`), not a bare `<pre>`; the committed `testdata/*.html` are term2html
+  fragments and **must be re-blessed as complete documents** when §8.1 lands.
 - **Unit tests:** selection math (line/rectangle from anchor+cursor),
   palette parse/serialize, capture-line-range → `-S/-E` derivation, option
   parsing.

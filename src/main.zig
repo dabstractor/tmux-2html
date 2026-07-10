@@ -491,6 +491,10 @@ test {
     // NOT exist yet — without this import the tests are unreachable). view.zig imports
     // ghostty-vt ⇒ its Terminal-building assertions share ONE test fn (the cross-test GOTCHA).
     _ = @import("tui/view.zig");
+    // P3.M2.T1.S1: keep tui/input.zig unit tests reachable (region.zig, its caller, does
+    // NOT exist yet — without this import the tests are unreachable). input.zig is
+    // ghostty-free ⇒ separate test fns (no cross-test GOTCHA).
+    _ = @import("tui/input.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {

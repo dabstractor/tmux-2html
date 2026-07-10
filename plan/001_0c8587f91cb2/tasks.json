@@ -681,14 +681,14 @@
               "type": "Task",
               "id": "P3.M2.T1",
               "title": "tui/input.zig: key decode + vim motions + search",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Decode keys (with counts) and implement the PRD §7.2 motion set and §7.3 search.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P3.M2.T1.S1",
                   "title": "Key-sequence decoder (arrows, Ctrl-mods, vim keys) + count prefix",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P3.M1.T1.S2"
@@ -703,7 +703,7 @@
                   "type": "Subtask",
                   "id": "P3.M2.T1.S2",
                   "title": "Vim motions (hjkl/wbe/0^$/ggG/Ctrl-dufb/HML/{}/%) + search (/ ? n N)",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 2,
                   "dependencies": [
                     "P3.M2.T1.S1"
