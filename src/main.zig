@@ -495,6 +495,10 @@ test {
     // NOT exist yet — without this import the tests are unreachable). input.zig is
     // ghostty-free ⇒ separate test fns (no cross-test GOTCHA).
     _ = @import("tui/input.zig");
+    // P3.M2.T1.S2: keep tui/motion.zig tests reachable (region.zig, its caller, does
+    // NOT exist yet). motion.zig is PURE (no Terminal) ⇒ separate test fns (no cross-test
+    // GOTCHA).
+    _ = @import("tui/motion.zig");
 }
 
 test "dispatch routes known subcommand to cli stub" {

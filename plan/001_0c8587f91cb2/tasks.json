@@ -674,14 +674,14 @@
           "type": "Milestone",
           "id": "P3.M2",
           "title": "TUI Input & Selection Model",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Key decoding + the full vim/arrow motion set + search (tui/input.zig), and the selection model with coordinate→Selection conversion (tui/select.zig).",
           "tasks": [
             {
               "type": "Task",
               "id": "P3.M2.T1",
               "title": "tui/input.zig: key decode + vim motions + search",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Decode keys (with counts) and implement the PRD §7.2 motion set and §7.3 search.",
               "subtasks": [
                 {
@@ -703,7 +703,7 @@
                   "type": "Subtask",
                   "id": "P3.M2.T1.S2",
                   "title": "Vim motions (hjkl/wbe/0^$/ggG/Ctrl-dufb/HML/{}/%) + search (/ ? n N)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P3.M2.T1.S1"
@@ -720,14 +720,14 @@
               "type": "Task",
               "id": "P3.M2.T2",
               "title": "tui/select.zig: selection model + coordinate conversion",
-              "status": "Planned",
+              "status": "Ready",
               "description": "The linewise/block selection model (PRD §7.4) and the conversion to a ghostty Selection for rendering.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P3.M2.T2.S1",
                   "title": "Selection model: linewise/block, v-toggle, o/O, anchor/cursor",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 2,
                   "dependencies": [
                     "P3.M2.T1.S1"
@@ -741,7 +741,7 @@
                   "type": "Subtask",
                   "id": "P3.M2.T2.S2",
                   "title": "Coordinate → Selection (pin) conversion; clamp + wide-cell rounding",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P3.M2.T2.S1",
