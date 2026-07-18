@@ -302,7 +302,7 @@ client via `tmux display-popup -E -w 100% -h 100%` running the binary.
   for performance on large grids; cap rendered rows to viewport, scroll with
   the cursor.
 - **Status line** (last row), copy-mode-style:
-  `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>Enter=render q=quit`.
+  `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  v=sel C-v=block o=swap Enter=render q=quit`.
 
 ### 7.2 Movement (vim + arrows)
 `h j k l` and `← ↓ ↑ →`; `w b e`; `0 ^ $`; `g g` / `G`; `Ctrl-d/u` half-page;
@@ -313,13 +313,30 @@ matching. Counts supported (e.g. `5j`).
 `/pattern` forward, `?pattern` backward, `n` / `N` next/prev; regex (or
 fixed-string, configurable). Matches highlighted in the grid.
 
-### 7.4 Selection — both modes via `v`
-- `v` begins selection at the cursor in **linewise** mode (anchor = cursor).
-- `v` pressed again toggles the active selection **linewise ↔ rectangle/block**.
-- Movement extends the selection from anchor to cursor.
-- `o` / `O` swap cursor to the other end of the selection.
+### 7.4 Selection — tmux copy-mode parity
+Mirrors tmux copy-mode-vi: a selection is owned by a fixed **anchor** (start)
+plus the live **cursor** (moving end). Critically, the anchor can be **re-placed
+at any time** by moving the cursor and pressing `v` again — this fixes the old
+behavior (where `V` locked the starting line until you exited the overlay) and
+makes the selection fully re-anchorable, exactly like tmux copy mode.
+
+- `v` — **begin / restart selection** at the current cursor position. Sets the
+  anchor to the cursor, (re)enters **linewise** mode (rectangle flag OFF), and
+  discards any prior selection. Move the cursor, then press `v` again to
+  re-anchor the start of the selection on the new line; repeat freely. This is
+  the only way to change the starting line, and it never exits the overlay.
+- `Ctrl-v` — **enter visual block (rectangle) mode.** If no selection is
+  active, begins a rectangle selection at the cursor; if a selection is active,
+  switches it to block mode (anchor + cursor retained). Pressing `Ctrl-v`
+  again toggles back to linewise (rectangle OFF) — i.e. rectangle-toggle, as in
+  tmux. `Ctrl-v` does **not** re-anchor; use `v` to move the start.
+- Movement extends the selection from the anchor to the cursor in the current
+  mode (linewise = full-width line range, block = rectangle).
+- `o` / `O` swap the cursor to the other end of the selection.
 - `Esc` clears the selection (stays in the TUI); `q` quits.
-- Aliases for familiarity: `V` linewise, `Ctrl-v`/`R` rectangle.
+- Familiarity aliases (do not re-anchor on their own — use `v` for that):
+  `V` = linewise begin (alias for `v`), `R` = block begin (alias for
+  `Ctrl-v`).
 
 **Selection → output mapping (own coordinates, exact):**
 - Linewise → formatter `Selection{ start=(0,r1), end=(cols-1,r2), rect=false }`.
@@ -546,7 +563,8 @@ Platform triples: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`,
 ## 17. Decisions log
 - **Stack:** Zig single binary (reuses ghostty-vt; absorbs term2html). Rationale:
   best fidelity, single language/build, in-house.
-- **Selection model:** line-range + block, toggled via `v`.
+- **Selection model:** line-range + block; `v` begins / re-anchors a linewise
+  selection at the cursor, `Ctrl-v` toggles visual block (tmux copy-mode parity).
 - **Plugin form:** full TPM plugin (entrypoint, options, bindings, install hook).
 - **Binary acquisition:** build-from-source first (if Zig), else download
   prebuilt; both paths shipped.
