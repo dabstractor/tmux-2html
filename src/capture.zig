@@ -272,6 +272,21 @@ pub fn querySessionName(runner: Runner, alloc: std.mem.Allocator, pane: []const 
     return alloc.dupe(u8, trimmed);
 }
 
+/// Query the window id for a pane (`#{window_id}`, e.g. "@1"). Returns a TRIMMED owned slice. On
+/// error / unset => empty (the caller falls back to the pane id alone). Used by the PRD §8.1
+/// default title form `tmux-2html — <session>/<window>.<pane> <iso8601>`.
+pub fn queryWindowId(runner: Runner, alloc: std.mem.Allocator, pane: []const u8) ![]u8 {
+    const out = runner.run(
+        &.{ "tmux", "display-message", "-p", "-t", pane, "#{window_id}" },
+        alloc,
+    ) catch {
+        return alloc.alloc(u8, 0);
+    };
+    defer alloc.free(out);
+    const trimmed = std.mem.trim(u8, out, " \t\n\r");
+    return alloc.dupe(u8, trimmed);
+}
+
 /// Resolve the output directory (PRD §9.2). Precedence:
 ///   1. explicit `@tmux-2html-output-dir` (if set + non-empty) wins;
 ///   2. else `$XDG_DATA_HOME/tmux-2html` (only if XDG_DATA_HOME is set, non-empty, AND absolute —
@@ -350,6 +365,7 @@ const FakeTmux = struct {
     history_size: u32,
     ansi: []const u8,
     session: []const u8 = "sess",
+    window: []const u8 = "@1",
     options: std.StringHashMap([]const u8),
 
     fn run(ctx: *anyopaque, argv: []const []const u8, alloc: std.mem.Allocator) anyerror![]u8 {
@@ -361,6 +377,9 @@ const FakeTmux = struct {
             }
             if (hasArg(argv, "#{session_name}")) {
                 return alloc.dupe(u8, self.session);
+            }
+            if (hasArg(argv, "#{window_id}")) {
+                return alloc.dupe(u8, self.window);
             }
             return error.UnexpectedArgv;
         }

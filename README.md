@@ -147,7 +147,7 @@ before the TPM `run` line.
 | `@tmux-2html-font` | `monospace` | CSS `font-family` in the rendered HTML. |
 | `@tmux-2html-history-limit` | `50000` | Max scrollback lines captured per pane. |
 | `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory holding the binary. |
-| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html` for `render`; a title including the session name, pane id, and a Unix timestamp for `pane`/`region`). |
+| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html` for `render`; a title including the session name, window id, pane id, and an ISO 8601 timestamp for `pane`/`region`). |
 | `@tmux-2html-lang` | *(empty)* | `<html lang>` attribute (BCP-47). Empty ⇒ derived from the locale (`LC_ALL`/`LC_MESSAGES`/`LANG`), falling back to `en`. |
 
 Every capture is a complete HTML5 document (see above). The `<title>` and

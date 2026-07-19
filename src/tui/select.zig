@@ -7,10 +7,11 @@
 //! `view.highlight` consume) for the TUI overlay AND for S2's grid-aware pin conversion
 //! (P3.M2.T2.S2 maps it 1:1 to `cli.SelectionCoords` → `render.buildSelection`).
 //!
-//! PRD §7.4 state machine:
-//!   `v` begins LINWISE at the cursor (anchor=cursor=cursor); `v` again toggles
-//!   linewise↔block; `V` linewise; `Ctrl-v`/`R` block; `o`/`O` swap the cursor to the other
-//!   end; `Esc` clears (stay in the TUI); movement extends the selection anchor→cursor.
+//! PRD §7.4 state machine (copy-mode parity):
+//!   `v` begins / RE-ANCHORS a linewise selection at the cursor (discards any prior selection);
+//!   `V` is a linewise alias of `v`; `Ctrl-v`/`R` begin block (inactive) or toggle
+//!   linewise↔block (active); `o`/`O` swap the cursor to the other end; `Esc` clears (stay
+//!   in the TUI); movement extends the selection anchor→cursor.
 //!
 //! Layering (arch tui_region.md §4): region.zig (P3.M3) OWNS a `motion.Cursor` + a `select.Sel`
 //! and keeps `sel.cursor` in sync with `Cursor.pos`; it calls `select.applyAction` for selection
@@ -27,7 +28,8 @@ const view = @import("view.zig"); // Pos, Selection, SelMode (SHIPPED — reuse,
 const input = @import("input.zig"); // Action (S1 CONTRACT — consume)
 
 /// The selection mode. `.none` ⇒ no active selection (the Sel exists but is dormant).
-/// PRD §7.4: `v` begins LINWISE; `v` again toggles linewise↔block; `V` linewise; `Ctrl-v`/`R` block.
+/// PRD §7.4: `v` begins / re-anchors linewise; `Ctrl-v` begins block (inactive) or toggles
+/// linewise↔block (active); `V` is a linewise alias of `v`.
 pub const Mode = enum { none, linewise, block };
 
 /// The interactive selection state. `anchor` = the fixed end (set at `begin`, unchanged by
@@ -51,9 +53,9 @@ pub const Sel = struct {
         self.mode = .none;
     }
 
-    /// Toggle linewise ↔ block (PRD §7.4 "v pressed again toggles"). Only meaningful when
-    /// `active()`; on `.none` it is a NO-OP (the `v`-begins path uses `begin`, not toggle).
-    /// Endpoints are PRESERVED (only the mode flips) — matches vim visual-mode `v` retoggle.
+    /// Toggle linewise ↔ block (PRD §7.4: `Ctrl-v` pressed again toggles back). Only meaningful
+    /// when `active()`; on `.none` it is a NO-OP (the `v`-begins path uses `begin`, not toggle).
+    /// Endpoints are PRESERVED (only the mode flips) — rectangle-toggle, as in tmux copy mode.
     pub fn toggle(self: *Sel) void {
         self.mode = switch (self.mode) {
             .linewise => .block,
@@ -123,28 +125,29 @@ pub const Sel = struct {
 /// them at the loop level — exit / confirm-render flow). `.clear` always clears; region.zig
 /// decides clear-vs-quit on Esc by checking `sel.active()` BEFORE calling this (see design_notes §2).
 ///
-/// PRD §7.4 per-action state table (authoritative):
-///   visual_toggle (v)     inactive ⇒ begin(cursor,.linewise); active ⇒ toggle() (linewise↔block)
-///   visual_line (V)       inactive ⇒ begin(cursor,.linewise); active ⇒ mode=.linewise (keep pts)
-///   visual_block (Ctrl-v/R) inactive ⇒ begin(cursor,.block);   active ⇒ mode=.block (keep pts)
+/// PRD §7.4 per-action state table (authoritative — copy-mode parity):
+///   visual_toggle (v)     ALWAYS begin(cursor,.linewise) — RE-ANCHORS at the cursor, DISCARDING
+///                         any prior selection (the only way to move the starting line)
+///   visual_line (V)       alias of `v`: begin(cursor,.linewise) (re-anchor)
+///   visual_block (Ctrl-v/R) inactive ⇒ begin(cursor,.block); active ⇒ toggle() (linewise↔block).
+///                         Does NOT re-anchor (use `v` to move the start).
 ///   swap_end/other (o/O)  inactive ⇒ NO-OP;                   active ⇒ swapEnds()
 ///   clear (Esc)           clear() — the clear-vs-QUIT decision is region.zig's
 ///   quit (q/Ctrl-c)       NO-OP on Sel (region.zig exits)
 ///   confirm (Enter/y)     NO-OP on Sel (region.zig: render selection)
 pub fn applyAction(sel: *Sel, action: input.Action, cursor: view.Pos) void {
     switch (action) {
-        .visual_toggle => {
-            // PRD §7.4: `v` begins LINWISE at cursor when inactive; toggles linewise↔block when active.
-            if (sel.active()) sel.toggle() else sel.begin(cursor, .linewise);
-        },
-        .visual_line => {
-            // PRD §7.4: `V` = linewise. If inactive, begin at cursor; if active, switch mode to
-            // linewise PRESERVING the endpoints (vim: V in visual mode switches to linewise).
-            if (!sel.active()) sel.begin(cursor, .linewise) else sel.mode = .linewise;
+        .visual_toggle, .visual_line => {
+            // PRD §7.4: `v` begins / RESTARTS selection at the cursor in linewise mode, DISCARDING
+            // any prior selection ("the only way to change the starting line"). `V` is a linewise
+            // alias of `v` (PRD §7.4 familiarity aliases) => same re-anchor behavior.
+            sel.begin(cursor, .linewise);
         },
         .visual_block => {
-            // PRD §7.4: `Ctrl-v`/`R` = block. Same begin/switch logic as visual_line, mode .block.
-            if (!sel.active()) sel.begin(cursor, .block) else sel.mode = .block;
+            // PRD §7.4: `Ctrl-v`/`R` enters visual block. Inactive ⇒ begin block at cursor; ACTIVE
+            // ⇒ TOGGLE linewise↔block (rectangle-toggle, as in tmux), endpoints PRESERVED. Does
+            // NOT re-anchor (use `v` to move the start).
+            if (!sel.active()) sel.begin(cursor, .block) else sel.toggle();
         },
         .swap_end, .swap_end_other => {
             // PRD §7.4: `o`/`O` swap cursor to the other end. Vim: a no-op when NOT in visual mode.
@@ -384,20 +387,26 @@ test "applyAction: .visual_toggle on INACTIVE Sel ⇒ begin linewise at cursor (
     try testing.expect(s.active());
 }
 
-test "applyAction: .visual_toggle on ACTIVE linewise ⇒ toggle to block (endpoints preserved)" {
+test "applyAction: .visual_toggle on ACTIVE linewise ⇒ RE-ANCHOR at cursor (begin linewise, discards prior)" {
+    // PRD §7.4: `v` ALWAYS begins/re-anchors a linewise selection at the cursor, discarding any
+    // prior selection. It does NOT toggle mode. This is the only way to move the starting line.
     var s = Sel{ .anchor = .{ .x = 1, .y = 2 }, .cursor = .{ .x = 3, .y = 4 }, .mode = .linewise };
-    applyAction(&s, .visual_toggle, .{ .x = 99, .y = 99 }); // cursor arg IGNORED when active
-    try testing.expectEqual(Mode.block, s.mode);
-    try testing.expectEqual(view.Pos{ .x = 1, .y = 2 }, s.anchor);
-    try testing.expectEqual(view.Pos{ .x = 3, .y = 4 }, s.cursor);
+    const cur: view.Pos = .{ .x = 9, .y = 9 };
+    applyAction(&s, .visual_toggle, cur); // cursor arg IS the new anchor (re-anchor)
+    try testing.expectEqual(Mode.linewise, s.mode); // still linewise (NOT toggled to block)
+    try testing.expectEqual(cur, s.anchor); // re-anchored at cursor
+    try testing.expectEqual(cur, s.cursor); // collapsed seed
 }
 
-test "applyAction: .visual_toggle on ACTIVE block ⇒ toggle to linewise" {
+test "applyAction: .visual_toggle on ACTIVE block ⇒ RE-ANCHOR at cursor (begin linewise, discards block)" {
+    // `v` re-anchors at the cursor in LINEWISE mode even when the prior selection was block —
+    // it discards the block mode + endpoints and restarts linewise (PRD §7.4: "re-enters linewise").
     var s = Sel{ .anchor = .{ .x = 1, .y = 2 }, .cursor = .{ .x = 3, .y = 4 }, .mode = .block };
-    applyAction(&s, .visual_toggle, .{ .x = 0, .y = 0 });
-    try testing.expectEqual(Mode.linewise, s.mode);
-    try testing.expectEqual(view.Pos{ .x = 1, .y = 2 }, s.anchor);
-    try testing.expectEqual(view.Pos{ .x = 3, .y = 4 }, s.cursor);
+    const cur: view.Pos = .{ .x = 5, .y = 6 };
+    applyAction(&s, .visual_toggle, cur);
+    try testing.expectEqual(Mode.linewise, s.mode); // linewise, NOT block
+    try testing.expectEqual(cur, s.anchor);
+    try testing.expectEqual(cur, s.cursor);
 }
 
 // ---- applyAction: visual_line ------------------------------------------------
@@ -411,20 +420,24 @@ test "applyAction: .visual_line on INACTIVE Sel ⇒ begin linewise at cursor" {
     try testing.expectEqual(cur, s.cursor);
 }
 
-test "applyAction: .visual_line on ACTIVE block ⇒ mode linewise (endpoints preserved)" {
+test "applyAction: .visual_line on ACTIVE block ⇒ RE-ANCHOR linewise at cursor (alias of v)" {
+    // PRD §7.4: `V` is a linewise alias of `v` => re-anchors at the cursor, discarding prior.
     var s = Sel{ .anchor = .{ .x = 2, .y = 3 }, .cursor = .{ .x = 4, .y = 5 }, .mode = .block };
-    applyAction(&s, .visual_line, .{ .x = 0, .y = 0 });
+    const cur: view.Pos = .{ .x = 6, .y = 7 };
+    applyAction(&s, .visual_line, cur);
     try testing.expectEqual(Mode.linewise, s.mode);
-    try testing.expectEqual(view.Pos{ .x = 2, .y = 3 }, s.anchor);
-    try testing.expectEqual(view.Pos{ .x = 4, .y = 5 }, s.cursor);
+    try testing.expectEqual(cur, s.anchor);
+    try testing.expectEqual(cur, s.cursor);
 }
 
-test "applyAction: .visual_line on ACTIVE linewise ⇒ stays linewise (endpoints preserved)" {
+test "applyAction: .visual_line on ACTIVE linewise ⇒ RE-ANCHOR linewise at cursor" {
+    // `V` re-anchors even when already linewise (alias of `v`, not a mode-stay).
     var s = Sel{ .anchor = .{ .x = 2, .y = 3 }, .cursor = .{ .x = 4, .y = 5 }, .mode = .linewise };
-    applyAction(&s, .visual_line, .{ .x = 0, .y = 0 });
+    const cur: view.Pos = .{ .x = 8, .y = 9 };
+    applyAction(&s, .visual_line, cur);
     try testing.expectEqual(Mode.linewise, s.mode);
-    try testing.expectEqual(view.Pos{ .x = 2, .y = 3 }, s.anchor);
-    try testing.expectEqual(view.Pos{ .x = 4, .y = 5 }, s.cursor);
+    try testing.expectEqual(cur, s.anchor);
+    try testing.expectEqual(cur, s.cursor);
 }
 
 // ---- applyAction: visual_block -----------------------------------------------
@@ -438,18 +451,20 @@ test "applyAction: .visual_block on INACTIVE Sel ⇒ begin block at cursor" {
     try testing.expectEqual(cur, s.cursor);
 }
 
-test "applyAction: .visual_block on ACTIVE linewise ⇒ mode block (endpoints preserved)" {
+test "applyAction: .visual_block on ACTIVE linewise ⇒ TOGGLE to block (endpoints preserved)" {
+    // PRD §7.4: `Ctrl-v` toggles linewise↔block when active; does NOT re-anchor.
     var s = Sel{ .anchor = .{ .x = 2, .y = 3 }, .cursor = .{ .x = 4, .y = 5 }, .mode = .linewise };
-    applyAction(&s, .visual_block, .{ .x = 0, .y = 0 });
+    applyAction(&s, .visual_block, .{ .x = 0, .y = 0 }); // cursor arg IGNORED when active
     try testing.expectEqual(Mode.block, s.mode);
-    try testing.expectEqual(view.Pos{ .x = 2, .y = 3 }, s.anchor);
+    try testing.expectEqual(view.Pos{ .x = 2, .y = 3 }, s.anchor); // endpoints preserved
     try testing.expectEqual(view.Pos{ .x = 4, .y = 5 }, s.cursor);
 }
 
-test "applyAction: .visual_block on ACTIVE block ⇒ stays block (endpoints preserved)" {
+test "applyAction: .visual_block on ACTIVE block ⇒ TOGGLE back to linewise (rectangle OFF)" {
+    // PRD §7.4: "Pressing Ctrl-v again toggles back to linewise (rectangle OFF)".
     var s = Sel{ .anchor = .{ .x = 2, .y = 3 }, .cursor = .{ .x = 4, .y = 5 }, .mode = .block };
     applyAction(&s, .visual_block, .{ .x = 0, .y = 0 });
-    try testing.expectEqual(Mode.block, s.mode);
+    try testing.expectEqual(Mode.linewise, s.mode); // toggled BACK to linewise
     try testing.expectEqual(view.Pos{ .x = 2, .y = 3 }, s.anchor);
     try testing.expectEqual(view.Pos{ .x = 4, .y = 5 }, s.cursor);
 }
@@ -570,10 +585,11 @@ test "integration: v(begin) → extend cursor → extent reflects range → o(sw
     try testing.expectEqual(@as(?view.Selection, null), s.extent(80));
 }
 
-test "integration: v(begin linewise) → v(toggle to block) → extent becomes rect" {
+test "integration: v(begin linewise) → Ctrl-v(toggle to block) → extent becomes rect" {
+    // PRD §7.4: `v` re-anchors linewise (never toggles); `Ctrl-v` toggles linewise↔block when active.
     var s: Sel = .{};
     const start: view.Pos = .{ .x = 2, .y = 1 };
-    applyAction(&s, .visual_toggle, start); // v ⇒ begin linewise
+    applyAction(&s, .visual_toggle, start); // v ⇒ begin linewise at start
     s.cursor = .{ .x = 8, .y = 5 }; // extend
     // linewise extent: full rows 1..5.
     const e1 = s.extent(80).?;
@@ -581,8 +597,8 @@ test "integration: v(begin linewise) → v(toggle to block) → extent becomes r
     try testing.expectEqual(@as(u32, 0), e1.x1);
     try testing.expectEqual(@as(u32, 79), e1.x2);
 
-    // v again ⇒ toggle to block. Endpoints PRESERVED.
-    applyAction(&s, .visual_toggle, .{ .x = 0, .y = 0 });
+    // Ctrl-v ⇒ toggle to block. Endpoints PRESERVED (rectangle-toggle).
+    applyAction(&s, .visual_block, .{ .x = 0, .y = 0 });
     try testing.expectEqual(Mode.block, s.mode);
     // block extent: rect, x=min(2,8)=2..max=8, y=min(1,5)=1..max=5.
     const e2 = s.extent(80).?;
@@ -591,4 +607,23 @@ test "integration: v(begin linewise) → v(toggle to block) → extent becomes r
     try testing.expectEqual(@as(u32, 1), e2.y1);
     try testing.expectEqual(@as(u32, 8), e2.x2);
     try testing.expectEqual(@as(u32, 5), e2.y2);
+}
+
+test "integration: v(begin) → move → v(RE-ANCHOR on new line) → starting line moved" {
+    // PRD §7.4: pressing `v` again RE-ANCHORS the selection at the cursor on the new line. This is
+    // the headline copy-mode-parity fix ("the only way to change the starting line").
+    var s: Sel = .{};
+    applyAction(&s, .visual_toggle, .{ .x = 3, .y = 2 }); // v ⇒ anchor=cursor=(3,2), linewise
+    s.cursor = .{ .x = 5, .y = 6 }; // move cursor down (anchor stays (3,2))
+    try testing.expectEqual(view.Pos{ .x = 3, .y = 2 }, s.anchor);
+    // extent rows 2..6.
+    const e1 = s.extent(80).?;
+    try testing.expectEqual(@as(u32, 2), e1.y1);
+    try testing.expectEqual(@as(u32, 6), e1.y2);
+
+    // `v` again at the new cursor position (5,6) ⇒ re-anchor there; prior selection discarded.
+    applyAction(&s, .visual_toggle, .{ .x = 5, .y = 6 });
+    try testing.expectEqual(view.Pos{ .x = 5, .y = 6 }, s.anchor); // re-anchored
+    try testing.expectEqual(view.Pos{ .x = 5, .y = 6 }, s.cursor); // collapsed seed
+    try testing.expectEqual(Mode.linewise, s.mode); // still linewise
 }

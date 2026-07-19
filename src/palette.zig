@@ -255,7 +255,8 @@ const MalformedLine = error{MalformedLine};
 /// Format the current wall-clock time as an ISO 8601 / RFC 3339 UTC string into `buf`
 /// (e.g. "2026-07-08T14:30:00Z"). Informational only — loadCache skips all '#' lines, so
 /// this value can't affect the round-trip. Returns "?" on any (impossible-in-practice) failure.
-fn formatIso8601(buf: []u8) []const u8 {
+/// PUB: also used by main.zig / region.zig for the PRD §8.1 default title form.
+pub fn formatIso8601(buf: []u8) []const u8 {
     const ts = std.time.timestamp(); // i64 Unix seconds, CLOCK_REALTIME wall clock.
     if (ts < 0) return "?"; // pre-1970 guard (never in practice).
     const es = std.time.epoch.EpochSeconds{ .secs = @intCast(ts) };

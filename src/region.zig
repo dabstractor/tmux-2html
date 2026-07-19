@@ -593,18 +593,31 @@ fn regionPid() i32 {
     return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
 }
 
-/// Build the PRD §8.1 default document title for a region: `tmux-2html — <session>/<pane> <unixtime>`.
-/// Mirrors main.zig's paneTitle (region shares the pane context). The session is queried via tmux
-/// (falls back to "pane" on query failure). Caller owns the returned slice. Runner-seamed =>
-/// unit-testable (mirrors paneTitle's query path).
+/// Build the PRD §8.1 default document title for a region: `tmux-2html — <session>/<window>.<pane> <iso8601>`.
+/// Mirrors main.zig's paneTitle (region shares the pane context). The session + window id are
+/// queried via tmux (session falls back to "pane" on query failure; window is omitted if
+/// unavailable). The timestamp is the ISO 8601 UTC wall-clock time (palette.formatIso8601).
+/// Caller owns the returned slice. Runner-seamed => unit-testable (mirrors paneTitle's query path).
 fn regionTitle(allocator: std.mem.Allocator, runner: capture.Runner, target: []const u8) ![]u8 {
     const session = capture.querySessionName(runner, allocator, target) catch
         try allocator.alloc(u8, 0);
     defer allocator.free(session);
     const sess_trim = std.mem.trim(u8, session, " \t\n\r");
     const sess: []const u8 = if (sess_trim.len > 0) sess_trim else "pane";
-    const ts = std.time.timestamp(); // Unix seconds (matches the output filename)
-    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, target, ts });
+
+    // window id (PRD §8.1: <window> component). Empty/unset => omit it.
+    const window = capture.queryWindowId(runner, allocator, target) catch
+        try allocator.alloc(u8, 0);
+    defer allocator.free(window);
+    const win_trim = std.mem.trim(u8, window, " \t\n\r");
+
+    var tsbuf: [32]u8 = undefined;
+    const ts = palette.formatIso8601(&tsbuf); // PRD §8.1: <iso8601> (e.g. 2026-07-19T05:22:29Z)
+
+    if (win_trim.len > 0) {
+        return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s}.{s} {s}", .{ sess, win_trim, target, ts });
+    }
+    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {s}", .{ sess, target, ts });
 }
 
 /// Resolve the PRD §8.1 document title for a region (S4): `--title` (opts.title) OVERRIDE wins
@@ -840,6 +853,7 @@ test "regionPrepare: @tmux-2html-history-limit non-numeric => defaults to 50000"
 const OptFake = struct {
     options: std.StringHashMap([]const u8),
     session: []const u8 = "sess",
+    window: []const u8 = "@2",
 
     fn run(ctx: *anyopaque, argv: []const []const u8, alloc: std.mem.Allocator) anyerror![]u8 {
         const self: *OptFake = @ptrCast(@alignCast(ctx));
@@ -851,6 +865,7 @@ const OptFake = struct {
         }.f;
         if (hasArg(argv, "display-message")) {
             if (hasArg(argv, "#{session_name}")) return alloc.dupe(u8, self.session);
+            if (hasArg(argv, "#{window_id}")) return alloc.dupe(u8, self.window);
             return error.UnexpectedArgv;
         }
         if (hasArg(argv, "show-option")) {
@@ -1031,30 +1046,47 @@ test "regionPid: Linux => > 0; else >= 0" {
     }
 }
 
-test "regionTitle: session + pane + timestamp => 'tmux-2html — <sess>/<pane> <digits>'" {
+test "regionTitle: session + window + pane + ISO8601 => 'tmux-2html — <sess>/<win>.<pane> <iso8601>'" {
     const alloc = testing.allocator;
     var fake = optFake(&.{}, "mysess");
+    fake.window = "@2"; // echoes #{window_id}
     defer fake.options.deinit();
     const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
 
     const title = try regionTitle(alloc, runner, "%7");
     defer alloc.free(title);
-    // PRD §8.1 default form: 'tmux-2html — <session>/<pane> <unixtime>'.
+    // PRD §8.1 default form: 'tmux-2html — <session>/<window>.<pane> <iso8601>'.
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/@2.%7 "));
+    const ts_s = title["tmux-2html — mysess/@2.%7 ".len..];
+    try testing.expectEqual(@as(usize, 20), ts_s.len); // YYYY-MM-DDTHH:MM:SSZ
+    try testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
+}
+
+test "regionTitle: empty window => omit window component" {
+    const alloc = testing.allocator;
+    var fake = optFake(&.{}, "mysess");
+    fake.window = "";
+    defer fake.options.deinit();
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
+
+    const title = try regionTitle(alloc, runner, "%7");
+    defer alloc.free(title);
     try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
-    // trailing component is the numeric Unix timestamp.
     const ts_s = title["tmux-2html — mysess/%7 ".len..];
-    _ = try std.fmt.parseInt(i64, ts_s, 10);
+    try testing.expectEqual(@as(usize, 20), ts_s.len);
+    try testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
 }
 
 test "regionTitle: empty session falls back to 'pane'" {
     const alloc = testing.allocator;
     var fake = optFake(&.{}, ""); // empty session_name => falls back to "pane"
+    fake.window = "@1";
     defer fake.options.deinit();
     const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = OptFake.run };
 
     const title = try regionTitle(alloc, runner, "%5");
     defer alloc.free(title);
-    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/@1.%5 "));
 }
 
 test "regionResolveTitle: --title override wins verbatim (no tmux query)" {
@@ -1077,10 +1109,11 @@ test "regionResolveTitle: null override => contextual default" {
 
     const title = try regionResolveTitle(alloc, null, runner, "%7");
     defer alloc.free(title);
-    // Delegates to regionTitle => PRD §8.1 default form 'tmux-2html — <session>/<pane> <unixtime>'.
-    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
-    const ts_s = title["tmux-2html — mysess/%7 ".len..];
-    _ = try std.fmt.parseInt(i64, ts_s, 10);
+    // Delegates to regionTitle => PRD §8.1 default form 'tmux-2html — <session>/<window>.<pane> <iso8601>'.
+    try testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/@2.%7 "));
+    const ts_s = title["tmux-2html — mysess/@2.%7 ".len..];
+    try testing.expectEqual(@as(usize, 20), ts_s.len);
+    try testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
 }
 
 test "selfBinDir: returns a non-empty dir (the test binary's dir)" {

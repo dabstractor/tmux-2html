@@ -313,19 +313,33 @@ fn currentPid() i32 {
     return if (builtin.os.tag == .linux) @intCast(std.os.linux.getpid()) else 0;
 }
 
-/// Build the PRD §8.1 default document title for a pane: `tmux-2html — <session>/<pane> <unixtime>`.
-/// `pane` is the resolved target pane id (e.g. "%5"); the session name is queried via tmux. On a
-/// session-name query failure the session falls back to "pane". Caller owns the returned slice.
-/// The timestamp is the Unix seconds (wall-clock, matching the output filename); it disambiguates
-/// captures and is always available (no calendar-math dependency).
+/// Build the PRD §8.1 default document title for a pane: `tmux-2html — <session>/<window>.<pane> <iso8601>`.
+/// `pane` is the resolved target pane id (e.g. "%5"); the session name + window id are queried via
+/// tmux. On a session-name query failure the session falls back to "pane"; on a window-id query
+/// failure the window component is omitted (just `<session>.<pane>`). The timestamp is the ISO
+/// 8601 UTC wall-clock time (palette.formatIso8601 — the codebase's shared ISO-8601 formatter).
+/// Caller owns the returned slice.
 fn paneTitle(allocator: std.mem.Allocator, runner: capture.Runner, pane: []const u8) ![]u8 {
     const session = capture.querySessionName(runner, allocator, pane) catch
         try allocator.alloc(u8, 0);
     defer allocator.free(session);
     const sess_trim = std.mem.trim(u8, session, " \t\n\r");
     const sess: []const u8 = if (sess_trim.len > 0) sess_trim else "pane";
-    const ts = std.time.timestamp(); // Unix seconds (matches the output filename)
-    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {d}", .{ sess, pane, ts });
+
+    // window id (PRD §8.1: <window> component). Empty/unset => omit it (render `<sess>/<pane>`).
+    const window = capture.queryWindowId(runner, allocator, pane) catch
+        try allocator.alloc(u8, 0);
+    defer allocator.free(window);
+    const win_trim = std.mem.trim(u8, window, " \t\n\r");
+
+    var tsbuf: [32]u8 = undefined;
+    const ts = palette.formatIso8601(&tsbuf); // PRD §8.1: <iso8601> (e.g. 2026-07-19T05:22:29Z)
+
+    if (win_trim.len > 0) {
+        return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s}.{s} {s}", .{ sess, win_trim, pane, ts });
+    }
+    // window unavailable => fall back to `<sess>/<pane>` (still has the ISO 8601 timestamp).
+    return std.fmt.allocPrint(allocator, "tmux-2html — {s}/{s} {s}", .{ sess, pane, ts });
 }
 
 /// Resolve the PRD §8.1 document title for a pane (S4): `--title` (opts.title) OVERRIDE wins
@@ -341,6 +355,29 @@ fn paneResolveTitle(
 ) ![]u8 {
     if (override) |t| return allocator.dupe(u8, t);
     return paneTitle(allocator, runner, pane) catch try allocator.dupe(u8, "tmux-2html");
+}
+
+/// Read a boolean @tmux-2html-* option (PRD §9.3: the binding passes only --target, so pane reads
+/// its behavior options itself). "on"/"true"/"yes"/"1" (case-insensitive) => true; empty/unset =>
+/// `default`; any other value (e.g. "off", "junk") => false. Mirrors region.zig's readBoolOption;
+/// runner-seamed => unit-testable.
+fn readBoolOption(runner: capture.Runner, allocator: std.mem.Allocator, name: []const u8, default: bool) bool {
+    const v = capture.queryOption(runner, allocator, name) catch return default; // query error => default
+    defer allocator.free(v);
+    const t = std.mem.trim(u8, v, " \t\n\r");
+    if (t.len == 0) return default;
+    return std.ascii.eqlIgnoreCase(t, "on") or std.ascii.eqlIgnoreCase(t, "true") or
+        std.ascii.eqlIgnoreCase(t, "yes") or std.mem.eql(u8, t, "1");
+}
+
+/// Read @tmux-2html-font (PRD §9.3; default "monospace"). Caller owns the returned slice.
+/// ""/unset => "monospace". Mirrors region.zig's readFontOption; runner-seamed => unit-testable.
+fn readFontOption(runner: capture.Runner, allocator: std.mem.Allocator) ![]u8 {
+    const v = try capture.queryOption(runner, allocator, "@tmux-2html-font");
+    defer allocator.free(v);
+    const t = std.mem.trim(u8, v, " \t\n\r");
+    if (t.len == 0) return allocator.dupe(u8, "monospace");
+    return allocator.dupe(u8, t);
 }
 
 /// Build a failure PaneResult (allocator-owned summary). The caller still must free the result's
@@ -479,13 +516,18 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
     // paneTitle's default. Factored into paneResolveTitle so the override is unit-testable.
     const title = try paneResolveTitle(allocator, opts.title, runner, target);
     defer allocator.free(title);
+    // PRD §9.3: the binding passes ONLY --target, so pane reads @tmux-2html-font itself (mirrors
+    // region.zig's confirm path). opts.font (cli --font default "monospace") is the fallback on a
+    // query error or unset; @tmux-2html-font wins when set. See docs/CONFIGURATION.md.
+    const font = readFontOption(runner, allocator) catch opts.font;
+    defer allocator.free(font);
     render_mod.renderToFileAtomic(
         allocator,
         result.output_path,
         result.cap_ansi,
         .{ .cols = result.cols, .rows = result.rows },
         colors,
-        opts.font,
+        font,
         // PRD §8.1 / P1.M1.T1.S4: <html lang> = explicit --lang (normalized), else locale, else "en".
         .{ .title = title, .lang = render_mod.resolveLang(opts.lang), .background = colors.background },
     ) catch {
@@ -505,8 +547,11 @@ fn paneBody(allocator: std.mem.Allocator, opts: cli.PaneOpts) anyerror!u8 {
     try stdout.writeAll(result.summary);
     try stdout.writeAll("\n");
 
-    // --open: best-effort (never changes the exit code).
-    if (opts.open) render_mod.spawnXdgOpen(result.output_path, allocator);
+    // --open: best-effort (never changes the exit code). PRD §9.3: the binding passes only
+    // --target, so pane also reads @tmux-2html-open (default on); OR opts.open so a direct
+    // `pane --open` still works (mirrors region.zig's confirm path).
+    const do_open = opts.open or readBoolOption(runner, allocator, "@tmux-2html-open", true);
+    if (do_open) render_mod.spawnXdgOpen(result.output_path, allocator);
 
     return result.code;
 }
@@ -714,7 +759,10 @@ const PaneFake = struct {
     history_size: u32 = 0,
     ansi: []const u8 = "\x1b[31mhi\x1b[0m\n",
     session: []const u8 = "mysess",
+    window: []const u8 = "@3",
     history_limit: ?[]const u8 = null, // @tmux-2html-history-limit value (null = unset)
+    font: ?[]const u8 = null, // @tmux-2html-font value (null = unset)
+    open: ?[]const u8 = null, // @tmux-2html-open value (null = unset)
 
     fn run(ctx: *anyopaque, argv: []const []const u8, alloc: std.mem.Allocator) anyerror![]u8 {
         const self: *PaneFake = @ptrCast(@alignCast(ctx));
@@ -731,6 +779,8 @@ const PaneFake = struct {
                 return std.fmt.allocPrint(alloc, "{d} {d} {d}", .{ self.cols, self.rows, self.history_size });
             if (hasArg(argv, "#{session_name}"))
                 return alloc.dupe(u8, self.session);
+            if (hasArg(argv, "#{window_id}"))
+                return alloc.dupe(u8, self.window);
             return error.UnexpectedArgv;
         }
         if (hasArg(argv, "capture-pane")) return alloc.dupe(u8, self.ansi);
@@ -740,6 +790,10 @@ const PaneFake = struct {
                 const name = argv[argv.len - 1];
                 if (std.mem.eql(u8, name, "@tmux-2html-history-limit")) {
                     if (self.history_limit) |v| return alloc.dupe(u8, v);
+                } else if (std.mem.eql(u8, name, "@tmux-2html-font")) {
+                    if (self.font) |v| return alloc.dupe(u8, v);
+                } else if (std.mem.eql(u8, name, "@tmux-2html-open")) {
+                    if (self.open) |v| return alloc.dupe(u8, v);
                 }
             }
             return alloc.alloc(u8, 0); // unset => empty
@@ -866,27 +920,45 @@ test "currentPid: returns a non-negative pid on Linux" {
     }
 }
 
-test "paneTitle: session + pane + timestamp => 'tmux-2html — <sess>/<pane> <digits>'" {
+test "paneTitle: session + window + pane + ISO8601 => 'tmux-2html — <sess>/<win>.<pane> <iso8601>'" {
     const alloc = std.testing.allocator;
-    var fake = PaneFake{ .session = "mysess" }; // echoes #{session_name}
+    var fake = PaneFake{ .session = "mysess", .window = "@3" }; // echoes #{session_name} + #{window_id}
     const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
 
     const title = try paneTitle(alloc, runner, "%7");
     defer alloc.free(title);
-    // PRD §8.1 default form: 'tmux-2html — <session>/<pane> <unixtime>'.
+    // PRD §8.1 default form: 'tmux-2html — <session>/<window>.<pane> <iso8601>'.
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/@3.%7 "));
+    const ts_s = title["tmux-2html — mysess/@3.%7 ".len..];
+    // ISO 8601 UTC: YYYY-MM-DDTHH:MM:SSZ (20 chars, ends with 'Z').
+    try std.testing.expectEqual(@as(usize, 20), ts_s.len);
+    try std.testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
+    // sanity: dashes at the ISO separator positions.
+    try std.testing.expectEqual(@as(u8, '-'), ts_s[4]);
+    try std.testing.expectEqual(@as(u8, 'T'), ts_s[10]);
+}
+
+test "paneTitle: empty window => omit window component ('tmux-2html — <sess>/<pane> <iso8601>')" {
+    const alloc = std.testing.allocator;
+    var fake = PaneFake{ .session = "mysess", .window = "" }; // window_id query empty
+    const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+
+    const title = try paneTitle(alloc, runner, "%7");
+    defer alloc.free(title);
     try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
     const ts_s = title["tmux-2html — mysess/%7 ".len..];
-    _ = try std.fmt.parseInt(i64, ts_s, 10);
+    try std.testing.expectEqual(@as(usize, 20), ts_s.len);
+    try std.testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
 }
 
 test "paneTitle: empty session falls back to 'pane'" {
     const alloc = std.testing.allocator;
-    var fake = PaneFake{ .session = "" }; // empty session_name => falls back to "pane"
+    var fake = PaneFake{ .session = "", .window = "@1" }; // empty session_name => falls back to "pane"
     const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
 
     const title = try paneTitle(alloc, runner, "%5");
     defer alloc.free(title);
-    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/%5 "));
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — pane/@1.%5 "));
 }
 
 test "paneResolveTitle: --title override wins verbatim (no tmux query)" {
@@ -907,8 +979,62 @@ test "paneResolveTitle: null override => contextual default" {
 
     const title = try paneResolveTitle(alloc, null, runner, "%7");
     defer alloc.free(title);
-    // Delegates to paneTitle => PRD §8.1 default form 'tmux-2html — <session>/<pane> <unixtime>'.
-    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/%7 "));
-    const ts_s = title["tmux-2html — mysess/%7 ".len..];
-    _ = try std.fmt.parseInt(i64, ts_s, 10);
+    // Delegates to paneTitle => PRD §8.1 default form 'tmux-2html — <session>/<window>.<pane> <iso8601>'.
+    try std.testing.expect(std.mem.startsWith(u8, title, "tmux-2html — mysess/@3.%7 "));
+    const ts_s = title["tmux-2html — mysess/@3.%7 ".len..];
+    try std.testing.expectEqual(@as(usize, 20), ts_s.len);
+    try std.testing.expectEqual(@as(u8, 'Z'), ts_s[ts_s.len - 1]);
+}
+
+// ---- readFontOption / readBoolOption (PRD §9.3: pane reads @tmux-2html-font/@tmux-2html-open) ---
+
+test "readFontOption: set => value; unset/empty => 'monospace'" {
+    const alloc = std.testing.allocator;
+    // set
+    {
+        var fake = PaneFake{ .font = "Fira Code" };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try std.testing.expectEqualStrings("Fira Code", font);
+    }
+    // unset => "monospace"
+    {
+        var fake = PaneFake{ .font = null };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try std.testing.expectEqualStrings("monospace", font);
+    }
+    // whitespace-only => "monospace"
+    {
+        var fake = PaneFake{ .font = "   " };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        const font = try readFontOption(runner, alloc);
+        defer alloc.free(font);
+        try std.testing.expectEqualStrings("monospace", font);
+    }
+}
+
+test "readBoolOption: on/true/yes/1 => true; off/junk => false; empty/unset => default" {
+    const alloc = std.testing.allocator;
+    const truthy = [_][]const u8{ "on", "ON", "true", "yes", "1" };
+    const falsy = [_][]const u8{ "off", "no", "0", "junk" };
+    for (truthy) |v| {
+        var fake = PaneFake{ .open = v };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        try std.testing.expect(readBoolOption(runner, alloc, "@tmux-2html-open", false));
+    }
+    for (falsy) |v| {
+        var fake = PaneFake{ .open = v };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        try std.testing.expect(!readBoolOption(runner, alloc, "@tmux-2html-open", true));
+    }
+    // unset => default
+    {
+        var fake = PaneFake{ .open = null };
+        const runner: capture.Runner = .{ .ctx = @ptrCast(&fake), .runFn = PaneFake.run };
+        try std.testing.expect(readBoolOption(runner, alloc, "@tmux-2html-open", true)); // default true
+        try std.testing.expect(!readBoolOption(runner, alloc, "@tmux-2html-open", false)); // default false
+    }
 }

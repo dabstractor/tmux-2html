@@ -45,7 +45,7 @@ For installation and a feature overview, see the `README.md`.
 | `@tmux-2html-font` | `monospace` | CSS `font-family` used in the rendered HTML. |
 | `@tmux-2html-history-limit` | `50000` | Maximum number of scrollback lines captured per pane. |
 | `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory containing the `tmux-2html` binary. |
-| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html — <session>/<pane> <iso8601>` for `pane`/`region`; `tmux-2html` for `render`). |
+| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html — <session>/<window>.<pane> <iso8601>` for `pane`/`region`; `tmux-2html` for `render`). |
 | `@tmux-2html-lang` | *(empty)* | `<html lang>` attribute (BCP-47 tag). Empty ⇒ locale-derived, fallback `en`. |
 
 > **`C-o` key-conflict note.** `C-o` is already used in the stock tmux prefix
@@ -155,9 +155,9 @@ literal matches.
 
 | Key | Action |
 |---|---|
-| `v` | begin a linewise selection at the cursor; press again to toggle linewise ↔ block |
-| `V` | begin or force a linewise selection |
-| `Ctrl-v` (or `R`) | begin or force a block selection |
+| `v` | begin / **re-anchor** a linewise selection at the cursor (discards any prior selection; the only way to move the starting line) |
+| `V` | linewise alias of `v` (re-anchor) |
+| `Ctrl-v` (or `R`) | begin a block selection; if one is already active, toggle linewise ↔ block (rectangle-toggle, as in tmux) |
 | `o` | swap the cursor to the other end of the selection |
 | `O` | same as `o` in v1 (block-corner distinction is not modeled) |
 | `Esc` | clear the selection and stay in the overlay |
