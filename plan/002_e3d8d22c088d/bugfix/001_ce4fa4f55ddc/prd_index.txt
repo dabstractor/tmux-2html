@@ -1,0 +1,12 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: Apostrophe in @tmux-2html-title silently breaks ALL prefix bindings
+  h3.1 Issue 2: HTML attribute injection / stored-XSS via --font / @tmux-2html-font
+ h2.3 Minor Issues (Nice to Fix)
+  h3.2 Issue 3: render --output does not create parent directories
+  h3.3 Issue 4: --lang "" (explicit empty) yields en rather than locale-derived
+ h2.4 Testing Summary
+---
+code:3 para:20 list:4
