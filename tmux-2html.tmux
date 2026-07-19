@@ -72,6 +72,15 @@ read_opt() {   # $1 = option name (@tmux-2html-<name>), $2 = default
     fi
 }
 
+# POSIX shell-escape: wrap $1 in single quotes with every embedded ' replaced
+# by '\' (close-quote, escaped-', reopen-quote). Safe to interpolate unquoted
+# into a /bin/sh -c string (e.g. tmux run-shell's command). Benign values
+# round-trip unchanged: shell_escape "My Pane" -> 'My Pane'.
+# Usage: shell_escape "Bob's pane" -> 'Bob'\''s pane'
+shell_escape() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
 # Keys (drive binding generation in P2.M2.T2.S1/S2).
 full_key=$(read_opt @tmux-2html-full-key O)
 region_key=$(read_opt @tmux-2html-region-key C-o)
@@ -113,9 +122,9 @@ lang_opt=$(read_opt @tmux-2html-lang "")
 # empty fragment ⇒ binary default. Single-quoted so a spaced value survives run-shell's
 # /bin/sh re-parse at fire time.
 title_arg=""
-[ -n "$title_opt" ] && title_arg="--title '$title_opt'"
+[ -n "$title_opt" ] && title_arg="--title $(shell_escape "$title_opt")"
 lang_arg=""
-[ -n "$lang_opt" ] && lang_arg="--lang '$lang_opt'"
+[ -n "$lang_opt" ] && lang_arg="--lang $(shell_escape "$lang_opt")"
 export title_opt lang_opt title_arg lang_arg
 
 # ----------------------------------------------------------------------

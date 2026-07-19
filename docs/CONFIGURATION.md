@@ -84,7 +84,8 @@ and auto-sync tasks; they are not propagated to `run-shell` children.
 The `@tmux-2html-title` and `@tmux-2html-lang` options are the exception: the plugin bakes them
 into the key bindings as `--title`/`--lang` flags (above), so the binary receives them directly
 rather than re-reading them. You can also pass `--title`/`--lang` yourself when running the
-binary standalone.
+binary standalone. Values containing special characters (including apostrophes) are POSIX
+shell-escaped in the generated bindings, so a title like `Bob's pane` is safe.
 
 ## The region overlay
 

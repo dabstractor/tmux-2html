@@ -74,4 +74,33 @@ done
 grep -q "^title_arg=--title 'My Pane'" "$DBG" || fail "set: debug seam title_arg wrong"
 grep -q "^lang_arg=--lang 'pt-BR'"     "$DBG" || fail "set: debug seam lang_arg wrong"
 
+# (c) Apostrophe in @tmux-2html-title MUST be POSIX shell-escaped, else the
+# naive single-quote wrap unbalances /bin/sh parsing of the run-shell command
+# and the binding silently no-ops (Issue 1). lang EMPTY here so the buggy form
+# has an ODD single-quote count (=> /bin/sh -n reliably catches it; see GOTCHA 1).
+run_loader "Bob's pane" "" "v"
+# (c.1) PRIMARY detector (reliable for all 3 bindings — they share title_arg):
+#       the debug seam must show the POSIX-escaped form, not the naive wrap.
+grep -qF "title_arg=--title 'Bob'\''s pane'" "$DBG" || fail "c: title not shell-escaped (debug seam)"
+grep -qx 'lang_arg=' "$DBG" || fail "c: lang_arg should be empty"
+# (c.2) END-TO-END: O/full + visible captured commands parse under /bin/sh -n.
+for sub in 'pane --full' 'pane --visible'; do
+    cmd=$(printf '%s' "$CAPTURE" | grep -F -- "$sub" | head -1 | sed 's/^BK [^ ]* run-shell //')
+    [ -n "$cmd" ] || fail "c: no '$sub' binding captured"
+    /bin/sh -n -c "$cmd" 2>/dev/null || fail "c: '$sub' command fails /bin/sh -n (apostrophe not escaped)"
+done
+# (c.3) REGION has a nested quoting layer (GOTCHA 2): the bug hides inside the
+# double-quoted display-popup arg at the run-shell level, so /bin/sh -n the
+# INNER popup command that display-popup re-runs at fire time.
+rline=$(printf '%s' "$CAPTURE" | grep -F 'region' | head -1)
+[ -n "$rline" ] || fail "c: no region binding captured"
+rinner=$(printf '%s' "$rline" | sed 's/.*display-popup -E -w 100% -h 100% "//; s/"; if.*//')
+/bin/sh -n -c "$rinner" 2>/dev/null || fail "c: region inner popup command fails /bin/sh -n"
+#
+# (c2) Apostrophe in @tmux-2html-lang (defense-in-depth; BCP-47-normalized in
+#      practice so this is unlikely, but the same escaping applies). title EMPTY.
+run_loader "" "it's" "v"
+grep -qF "lang_arg=--lang 'it'\''s'" "$DBG" || fail "c2: lang not shell-escaped (debug seam)"
+grep -qx 'title_arg=' "$DBG" || fail "c2: title_arg should be empty"
+
 echo "PASS: @tmux-2html-title/@tmux-2html-lang thread into all bindings (defaults empty; set ⇒ flags before --target)"
