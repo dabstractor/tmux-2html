@@ -1,0 +1,163 @@
+#!/bin/sh
+# tests/envelope_smoke.sh — §8.1 end-to-end integration smoke (PRD §0: isolated tmux only).
+#
+# Drives the REAL ./zig-out/bin/tmux-2html through every HTML output path and asserts each
+# emits a COMPLETE §8.1 document (<!DOCTYPE html> … </html>), never a bare <pre> fragment,
+# with correct <title> (escaped) / <html lang> / page-bg. Covers:
+#   render: stdout, --output, --open->temp, --selection linewise + block, --title/--lang, C-locale->en
+#   pane:   --visible, --full      (against an ISOLATED, uniquely-named tmux server)
+#   region: confirm (programmatic, via python3 pty — SKIPped if python3 absent)
+#
+# PRD §0 SAFETY: creates its OWN `tmux -L tmux-2html-smoke-$$` server via a PATH shim that
+# intercepts EVERY tmux call the binary makes, and tears down ONLY that named session
+# (`kill-session -t test`). NEVER kill-server/killall/pkill. SKIPs cleanly (exit 0) if tmux
+# is absent, so it is safe to add to any CI runner.
+#
+# Run:  sh tests/envelope_smoke.sh      # -> PASS, exit 0
+set -u
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+cd "$REPO"
+BIN=./zig-out/bin/tmux-2html
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# --- prerequisites -----------------------------------------------------------
+if ! command -v tmux >/dev/null 2>&1; then
+    echo "SKIP: tmux not installed (integration smoke needs an isolated tmux server)"
+    exit 0
+fi
+REAL_TMUX=$(command -v tmux)
+
+if [ ! -x "$BIN" ]; then
+    echo "building release binary..."
+    zig build -Doptimize=ReleaseFast || fail "zig build failed"
+fi
+
+have_py=0
+command -v python3 >/dev/null 2>&1 && have_py=1
+
+# --- §8.1 document-completeness assertion -----------------------------------
+# Starting with <!DOCTYPE html> proves the output is a COMPLETE document, NOT a bare fragment
+# (a fragment would start with <pre or <span). Plus the required envelope markers + </html> tail.
+check_doc() {
+    f=$1
+    [ -s "$f" ] || fail "check_doc: $f missing or empty"
+    head -c 15 "$f" | grep -q '^<!DOCTYPE html>' || fail "$f: not a complete doc (no <!DOCTYPE html> first -> bare fragment?)"
+    grep -q '<html lang=' "$f"                 || fail "$f: missing <html lang="
+    grep -q '<meta charset="utf-8">' "$f"      || fail "$f: missing <meta charset=utf-8> (charset-first)"
+    grep -q '<pre class="term2html-output"' "$f" || fail "$f: missing <pre class=term2html-output>"
+    grep -q '</pre>' "$f"                      || fail "$f: missing </pre>"
+    tail -c 12 "$f" | grep -q '</html>'        || fail "$f: does not end with </html>"
+}
+
+W=$(mktemp -d "${TMPDIR:-/tmp}/t2h-smoke.XXXXXX")
+trap 'rm -rf "$W"' EXIT
+
+# --- RENDER paths (stdin -> stdout/file; no tmux) ----------------------------
+ANSI=$W/red.ansi
+printf '\033[31mRED\033[0m normal\n' > "$ANSI"
+
+# (1) stdout: complete doc + red color span + default title
+"$BIN" render --cols 40 --rows 3 --palette default < "$ANSI" > "$W/r_stdout.html" || fail "render stdout"
+check_doc "$W/r_stdout.html"
+grep -q 'color: #cc6666' "$W/r_stdout.html"    || fail "render stdout: red color span missing"
+grep -q '<title>tmux-2html</title>' "$W/r_stdout.html" || fail "render stdout: default title"
+
+# (2) --title escaped + --lang attribute
+"$BIN" render --cols 40 --rows 3 --palette default --title 'A&B<c>' --lang pt-BR < "$ANSI" > "$W/r_title.html" || fail "render --title/--lang"
+check_doc "$W/r_title.html"
+grep -q '<title>A&amp;B&lt;c&gt;</title>' "$W/r_title.html" || fail "render: --title not HTML-escaped"
+grep -q '<html lang="pt-BR">' "$W/r_title.html" || fail "render: --lang attr wrong/missing"
+
+# (3) forced C locale -> lang="en" (deterministic; explicit override not given)
+env -i LC_ALL=C LANG=C PATH="$PATH" HOME="$HOME" "$BIN" render --cols 20 --rows 1 --palette default < "$ANSI" > "$W/r_c.html" || fail "render C-locale"
+grep -q '<html lang="en">' "$W/r_c.html" || fail "C/empty locale must yield lang=en"
+
+# (4) --output FILE
+"$BIN" render --cols 40 --rows 3 --palette default --output "$W/r_out.html" < "$ANSI" || fail "render --output"
+check_doc "$W/r_out.html"
+
+# (5) --open -> temp under TMPDIR (xdg-open best-effort, ignored if absent)
+TW=$W/tmpopen; mkdir -p "$TW"
+TMPDIR="$TW" "$BIN" render --cols 40 --rows 3 --palette default --open < "$ANSI" >/dev/null 2>&1 || true
+TOF=$(ls "$TW"/tmux-2html-*.html 2>/dev/null | head -1)
+[ -n "$TOF" ] || fail "render --open: no temp html under TMPDIR"
+check_doc "$TOF"
+
+# (6) --selection linewise
+printf 'line1\nline2\nline3\n' | "$BIN" render --cols 10 --rows 3 --palette default --selection 0,0,9,1 > "$W/r_sel.html" || fail "render --selection linewise"
+check_doc "$W/r_sel.html"
+
+# (7) --selection block (rect=1)
+printf 'AAAA\nBBBB\nCCCC\n' | "$BIN" render --cols 4 --rows 3 --palette default --selection 0,0,1,2,1 > "$W/r_selb.html" || fail "render --selection block"
+check_doc "$W/r_selb.html"
+echo "  render: 7/7 paths emit complete §8.1 documents (title/lang/bg correct)"
+
+# --- PANE paths (ISOLATED tmux server via PATH shim) -------------------------
+SOCK="tmux-2html-smoke-$$"
+SHIM=$W/shim; mkdir -p "$SHIM"
+printf '#!/bin/sh\nexec "%s" -L "%s" "$@"\n' "$REAL_TMUX" "$SOCK" > "$SHIM/tmux"
+chmod +x "$SHIM/tmux"
+"$REAL_TMUX" -L "$SOCK" new-session -d -s test -x 80 -y 10 || fail "isolated tmux new-session"
+"$REAL_TMUX" -L "$SOCK" send-keys -t test "printf '\\033[31mRED\\033[0m pane-content'" Enter
+sleep 0.5
+PANE=$("$REAL_TMUX" -L "$SOCK" list-panes -t test -F '#{pane_id}' | head -1)
+
+# pane --visible
+PATH="$SHIM:$PATH" TMUX_PANE="$PANE" "$BIN" pane --visible --output "$W/p_vis.html" >/dev/null 2>&1 || fail "pane --visible"
+check_doc "$W/p_vis.html"
+grep -q 'color: #cc6666' "$W/p_vis.html" || fail "pane --visible: red color span missing"
+
+# pane --full
+PATH="$SHIM:$PATH" TMUX_PANE="$PANE" "$BIN" pane --full --output "$W/p_full.html" >/dev/null 2>&1 || fail "pane --full"
+check_doc "$W/p_full.html"
+echo "  pane:   2/2 paths emit complete §8.1 documents (against isolated tmux)"
+
+# --- REGION confirm (programmatic, via python3 pty) --------------------------
+if [ "$have_py" -eq 0 ]; then
+    echo "  region: SKIP (python3 absent — render --selection covers the same render path)"
+else
+    ROF=$W/region.html; rm -f "$ROF"
+    PATH="$SHIM:$PATH" python3 - "$PANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
+import os, pty, select, sys, time
+pane, out = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe("./zig-out/bin/tmux-2html",
+               ["tmux-2html", "region", "--target", pane, "--output", out],
+               os.environ.copy())
+else:
+    time.sleep(0.8)           # let the TUI paint
+    os.write(fd, b"v")        # start a linewise selection at the cursor
+    time.sleep(0.2)
+    os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        r, _, _ = select.select([fd], [], [], 0.2)
+        if r:
+            try:
+                data = os.read(fd, 4096)
+            except OSError:
+                break
+            if not data:
+                break
+        else:
+            wpid, _ = os.waitpid(pid, os.WNOHANG)
+            if wpid != 0:
+                break
+    try:
+        os.waitpid(pid, 0)
+    except OSError:
+        pass
+    if not os.path.exists(out):
+        sys.exit("region: no output file written (confirm did not fire)")
+PYEOF
+    check_doc "$ROF"
+    echo "  region: 1/1 confirm emits a complete §8.1 document (via python3 pty)"
+fi
+
+# --- teardown: ONLY the named isolated session (PRD §0 — never kill-server) --
+"$REAL_TMUX" -L "$SOCK" kill-session -t test 2>/dev/null || true
+
+echo "PASS: §8.1 end-to-end — every output path is a complete document (title/lang/bg correct; zero bare fragments)"

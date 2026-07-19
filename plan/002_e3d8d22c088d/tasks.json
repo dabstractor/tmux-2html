@@ -117,14 +117,14 @@
               "type": "Task",
               "id": "P1.M1.T3",
               "title": "Validate §8.1 end-to-end: goldens unchanged + title/lang tests + isolated-tmux integration",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Prove the §8.1 delta is complete and correct: the existing renderer goldens remain byte-identical (the core envelope + re-blessed docs already pass), the new --title/--lang behavior is covered by tests, and an isolated-tmux integration smoke confirms render (stdout/--output/--open/--selection), pane (--visible/--full), and region confirm all emit COMPLETE documents with the expected title/lang/page-bg and NO bare fragment anywhere. Honors PRD §0 (isolated, uniquely-named tmux server only).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T3.S1",
                   "title": "Goldens-unchanged check + --title/--lang tests + isolated-tmux output-path smoke",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",

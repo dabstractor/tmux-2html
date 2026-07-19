@@ -110,6 +110,17 @@ fn lineCount(ansi: []const u8) u16 {
     return @intCast(@min(n, std.math.maxInt(u16)));
 }
 
+/// Size ghostty-vt's scrollback limit (in BYTES) for a captured pane so the FULL scrollback is
+/// retained. `Terminal.init` defaults `max_scrollback` to 10_000 — but that option is the
+/// scrollback limit in BYTES (Screen.Options: "maximum size of scrollback in bytes"), NOT
+/// rows, so 10 KiB silently prunes almost all scrollback (a 319-col pane keeps only ~160
+/// rows). Measured page-storage cost is ~9.8 bytes/cell, so `lines * cols * 32` (~3.3x
+/// headroom for page granularity + any re-wrap) holds the entire capture. This is a LIMIT,
+/// not a pre-allocation, so the headroom costs nothing unless the content actually needs it.
+pub fn scrollbackBytes(ansi: []const u8, cols: u16) usize {
+    return @as(usize, lineCount(ansi)) * @as(usize, @max(cols, 1)) * 32;
+}
+
 /// The ONE rendering primitive: ANSI bytes -> self-contained HTML via the vendored
 /// ScreenFormatter. Writes a `<pre class="term2html-output">…</pre>` fragment to `out`.
 ///
@@ -138,7 +149,7 @@ pub fn renderGrid(
     font: ?[]const u8,
     out: *std.Io.Writer,
 ) !void {
-    var t = try Terminal.init(alloc, .{ .cols = size.cols, .rows = size.rows });
+    var t = try Terminal.init(alloc, .{ .cols = size.cols, .rows = size.rows, .max_scrollback = scrollbackBytes(ansi, size.cols) });
     defer t.deinit(alloc);
 
     var stream = t.vtStream();
@@ -1169,6 +1180,30 @@ test "renderGrid: red foreground emits styled span" {
         try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, html, "&#30495;"));
         // Sanity: the raw UTF-8 bytes do NOT appear (the formatter encoded them).
         try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, html, "\xe7\x9c\x9f"));
+    }
+
+    // ---- scrollback retention regression (ghostty max_scrollback is BYTES, not rows) ----
+    // Feeding MANY more lines than `rows` must keep the WHOLE scrollback, not just the tail.
+    // Terminal.init defaults max_scrollback to 10_000 BYTES (~10 KiB), which prunes almost
+    // everything; scrollbackBytes(ansi, cols) sizes it to the content. 400 lines into a
+    // 5-row terminal => BOTH the first (L000) and last (L399) survive. Without the fix, L000
+    // (and ~375 earlier rows) are pruned and only the tail remains.
+    {
+        const a = std.testing.allocator;
+        var synth: std.ArrayList(u8) = .{};
+        defer synth.deinit(a);
+        var i: usize = 0;
+        while (i < 400) : (i += 1) {
+            try synth.writer(a).print("L{d:0>3}", .{i});
+            try synth.append(a, '\n');
+        }
+        var aw = try std.Io.Writer.Allocating.initCapacity(a, 1 << 20);
+        defer aw.deinit();
+        try renderGrid(a, synth.items, .{ .cols = 40, .rows = 5 }, palette.defaultColors(), null, null, &aw.writer);
+        const out = try a.dupe(u8, aw.writer.buffered());
+        defer a.free(out);
+        try std.testing.expect(std.mem.indexOf(u8, out, "L000") != null); // first line retained
+        try std.testing.expect(std.mem.indexOf(u8, out, "L399") != null); // last line retained
     }
 }
 

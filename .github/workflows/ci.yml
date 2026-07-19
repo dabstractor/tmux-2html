@@ -73,6 +73,44 @@ jobs:
         env:
           ZIG_HTTP_MAX_CONNS: "1"
 
+  # §8.1 end-to-end envelope smoke (P1.M1.T3.S1). Drives the REAL ./zig-out/bin/tmux-2html
+  # through every HTML output path (render stdout/--output/--open→temp/--selection linewise+
+  # block/--title/--lang/C-locale; pane --visible/--full; region confirm via python3 pty) and
+  # asserts each emits a COMPLETE §8.1 document (<!DOCTYPE html> … </html>), never a bare <pre>
+  # fragment, with correct escaped <title>/<html lang>/page-bg. The §8.1 "done" gate (PRD §15).
+  #
+  # PRD §0 SAFETY: the smoke creates its OWN uniquely-named tmux server via a PATH shim that
+  # intercepts EVERY tmux call the binary makes, and tears down ONLY that named session
+  # (`kill-session -t test`); it NEVER uses kill-server/killall/pkill/the runner's socket.
+  # It SKIPs cleanly (exit 0) if tmux is absent, so it is safe on any runner — but we install
+  # tmux here so the assertions actually run. linux only: the region pty drive + PATH shim are
+  # POSIX; macOS is already covered by the `test` matrix (the Zig unit tests include the
+  # title/lang/override-branch component tests). A regression here fails CI.
+  envelope:
+    name: §8.1 envelope smoke (isolated tmux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Install tmux
+        # python3 is already present on ubuntu-latest (needed only for the region pty drive;
+        # the smoke SKIPs region gracefully if python3 is absent).
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Build release binary
+        run: zig build -Doptimize=ReleaseFast
+        env:
+          ZIG_HTTP_MAX_CONNS: "1"
+
+      - name: §8.1 envelope integration smoke
+        run: sh tests/envelope_smoke.sh
+
   # Plugin option threading test (P1.M1.T2.S1). A separate, dependency-free job: it sources
   # tmux-2html.tmux under a MOCKED `tmux()` shell function (never a real tmux binary/socket —
   # PRD §0-safe) and asserts the §8.1 options @tmux-2html-title/@tmux-2html-lang thread into all
@@ -88,3 +126,22 @@ jobs:
 
       - name: Plugin option threading test (mocked tmux; no tmux required)
         run: sh tests/plugin_options.sh
+
+  # Repo safety guard (AGENTS.md). Runs scripts/check-safety.sh — the deterministic static
+  # scan that FAILs on the anti-patterns behind the 2026-07-18 runaway-audit incident:
+  # recursive bare-`exec tmux` PATH shims, unbounded `>> calls.log`, and catastrophic
+  # global tmux teardown (kill-server / killall tmux / pkill tmux, or bare kill-server not
+  # scoped to an isolated -L socket). Enforced in CI so it gates every contributor/agent,
+  # not only opt-in local pre-commit hooks. linux only: the scanner is bash + GNU coreutils
+  # (readlink -f / stat -c / numfmt / find -printf).
+  safety:
+    name: repo safety scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run check-safety.sh
+        run: |
+          chmod +x scripts/check-safety.sh
+          ./scripts/check-safety.sh

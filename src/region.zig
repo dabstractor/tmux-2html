@@ -318,7 +318,12 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
     //
     //     GOTCHA: the Terminal row count is cap.rows (the pane's VISIBLE height), NOT
     //     total_rows. Do NOT init the Terminal with total_rows rows.
-    var t = try Terminal.init(allocator, .{ .cols = cap.cols, .rows = cap.rows });
+    //
+    //     SCROLLBACK SIZING: ghostty's max_scrollback is BYTES, not rows, and Terminal.init
+    //     defaults it to 10_000 (~10 KiB) — which prunes almost all scrollback (only ~160 rows
+    //     survive on a 319-col pane). Size it to the captured content via render.scrollbackBytes
+    //     so the whole scrollback is retained. See render.scrollbackBytes for the derivation.
+    var t = try Terminal.init(allocator, .{ .cols = cap.cols, .rows = cap.rows, .max_scrollback = render.scrollbackBytes(cap.ansi, cap.cols) });
     defer t.deinit(allocator);
     var stream = t.vtStream();
     defer stream.deinit();
@@ -1084,3 +1089,4 @@ test "selfBinDir: returns a non-empty dir (the test binary's dir)" {
     defer alloc.free(dir);
     try testing.expect(dir.len > 0); // the running test binary's directory
 }
+

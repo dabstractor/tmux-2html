@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# check-safety.sh — deterministic static guard against the anti-patterns that
+# caused the 2026-07-18 runaway-audit incident (recursive `tmux` PATH shim +
+# unbounded calls.log).
+#
+# FAIL (exit non-zero) repo-wide on ACTUAL dangerous invocations:
+#   R1  catastrophic tmux teardown:
+#         - `killall tmux`, `pkill tmux`, `pkill -f …tmux`  (no safe form)
+#         - bare `tmux kill-server` / `kill-server` NOT scoped to an isolated
+#           `-L <socket>` (a scoped `tmux -L <iso> kill-server` is the PRD §0
+#           sanctioned teardown variant, so it is allowed).
+#   R2  recursive shim footgun: `exec tmux …` with a bare name instead of an
+#       absolute path / variable (PRD §0.1).
+# WARN (exit stays 0) everywhere EXCEPT scripts/ on:
+#   R3  hand-rolled shim recipe (`PATH="…:$PATH"` + an `exec`/`>>` sink).
+#   R4  unbounded audit-log append (`>> …calls.log`).
+#
+# Precision: documentation is where a rule is *described*; code/snippets are
+# where it is *obeyed*. So lines that are prose/comment/search-context are
+# skipped: backticked spans, `#`/`//` comments, markdown list/quote/table
+# leaders, and lines that are themselves grepping FOR the pattern.
+#
+# Usage:
+#   scripts/check-safety.sh                 # whole-repo bounded scan
+#   scripts/check-safety.sh --paths a b c   # scan only the listed files
+# Exit: 0 if no FAIL, 1 on any FAIL, 2 usage error.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+paths=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --paths) shift; while [ $# -gt 0 ]; do paths+=("$1"); shift; done;;
+    -h|--help) sed -n '2,28p' "$0"; exit 0;;
+    *) echo "check-safety: unknown arg: $1 (see --help)" >&2; exit 2;;
+  esac
+done
+
+is_text() { case "$(file -b --mime-type "$1" 2>/dev/null)" in text/*|*xml|*json|*javascript|*shellscript) return 0;; *) return 1;; esac; }
+under_scripts() { case "$1" in "$ROOT/scripts/"*|"$ROOT/scripts") return 0;; *) return 1;; esac; }
+
+# Return 0 (skip) when a line is documentation/comment/search-context, not code.
+should_skip() {
+  local l="$1" s c
+  case "$l" in *'`'*) return 0;; esac                       # backtick span => prose
+  s="${l#"${l%%[![:space:]]*}"}"                             # left-trim
+  c="${s:0:1}"
+  case "$c" in '#'|'/') return 0;; esac                     # comment (# or //)
+  case "$c" in '>') return 0;; '|'*) return 0;; esac        # md quote / pipe-led (invalid cmd)
+  case "$c" in '-') [ "${s:1:1}" = ' ' ] && return 0;; '*' ) [ "${s:1:1}" = ' ' ] && return 0;; esac  # md list/bullet
+  # the line is itself scanning for the pattern (grep/rg/awk/sed), not running it
+  if printf '%s' "$l" | grep -qE '\b(grep|rg|ack|ag|awk|sed)\b'; then return 0; fi
+  return 1
+}
+
+fails=0; warns=0
+emit() { # sev rel line text
+  printf '  [%s] %s:%s: %s\n' "$1" "$2" "$3" "$4"
+  case "$1" in FAIL) fails=$((fails+1));; WARN) warns=$((warns+1));; esac
+}
+
+# scan_pat <sev> <pattern> <file> <rel> [mode]
+# mode "killserver" => only FAIL when the line has no isolated `-L <sock>`.
+scan_pat() {
+  local sev="$1" pat="$2" f="$3" rel="$4" mode="${5:-}" line ln txt
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ln="${line%%:*}"; txt="${line#*:}"
+    should_skip "$txt" && continue
+    if [ "$mode" = "killserver" ]; then
+      case "$txt" in *-L*) continue;; esac    # scoped to an isolated socket => safe
+    fi
+    emit "$sev" "$rel" "$ln" "$txt"
+  done < <(grep -InE "$pat" "$f" 2>/dev/null || true)
+}
+
+# R3 combo: a file that BOTH prepends to PATH and has an exec/>> sink.
+shim_combo() {
+  local f="$1" rel="$2" line ln txt
+  grep -qE 'PATH="[^"]*:\$PATH"|PATH=[^:]*:\$PATH' "$f" 2>/dev/null || return 0
+  grep -qE '\bexec[[:space:]]|>>' "$f" 2>/dev/null || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ln="${line%%:*}"; txt="${line#*:}"
+    should_skip "$txt" && continue
+    emit WARN "$rel" "$ln" "PATH-prepend shim recipe (prefer scripts/with-tmux-audit.sh): $txt"
+  done < <(grep -InE 'PATH="[^"]*:\$PATH"|PATH=[^:]*:\$PATH' "$f" 2>/dev/null || true)
+}
+
+R1_KILL='killall[[:space:]]+tmux|pkill[[:space:]]+tmux|pkill[[:space:]]+-f[[:space:]]+[^[:space:]]*tmux'
+R2='exec[[:space:]]+tmux([[:space:]]|$|[[:punct:]])'
+R4='>>[[:space:]]*[^[:space:]]*calls\.log'
+
+collect_files() {
+  if [ "${#paths[@]}" -gt 0 ]; then printf '%s\n' "${paths[@]}"; return; fi
+  find "$ROOT" -xdev -type f -size -2M \
+    -not -path "$ROOT/.git/*" -not -path "$ROOT/.zig-cache/*" \
+    -not -path "$ROOT/zig-pkg/*"  -not -path "$ROOT/zig-out/*" \
+    -not -path "$ROOT/.pi-subagents/*" -not -path "$ROOT/node_modules/*" \
+    -not -path "$ROOT/scratch/*" -print 2>/dev/null
+}
+
+echo "== check-safety: scanning =="
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  is_text "$f" || continue
+  [ "$(readlink -f "$f" 2>/dev/null || echo "$f")" = "$SELF" ] && continue   # don't scan self
+  rel="${f#$ROOT/}"
+  scan_pat FAIL "$R1_KILL"   "$f" "$rel"
+  scan_pat FAIL 'kill-server' "$f" "$rel" killserver
+  scan_pat FAIL "$R2"        "$f" "$rel"
+  if ! under_scripts "$f"; then
+    shim_combo "$f" "$rel"
+    scan_pat WARN "$R4"      "$f" "$rel"
+  fi
+done < <(collect_files)
+
+echo
+echo "== result: ${fails} FAIL(s), ${warns} WARN(s) =="
+if [ "$fails" -gt 0 ]; then
+  echo "check-safety: FAILED — fix the violations above (see AGENTS.md §1)." >&2
+  exit 1
+fi
+exit 0

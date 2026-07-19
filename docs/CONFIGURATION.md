@@ -99,8 +99,10 @@ Confirming a selection renders it to an HTML file (and honors
 
 ### What you see
 
-The overlay paints the captured grid in full color and a status line on the
-bottom row. The status line has the exact format:
+The overlay paints the captured grid in full color, with the **cursor shown as a
+reverse-video block** (like tmux copy mode) so you can always see where you are —
+even before starting a selection — and a status line on the bottom row. The status
+line has the exact format:
 
 ```
 [LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>  Enter=render q=quit

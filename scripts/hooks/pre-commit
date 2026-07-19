@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# pre-commit — opt-in commit gate that runs scripts/check-safety.sh on staged
+# text files. To enable:  git config core.hooksPath scripts/hooks
+# To disable:            git config --unset core.hooksPath
+# CI runs the same scan regardless, so this is just a faster local backstop.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# Staged, added/modified text files only.
+mapfile -t FILES < <(
+  git diff --cached --name-only --diff-filter=ACM |
+  grep -vE '\.(png|jpe?g|gif|webp|svg|ico|woff2?|ttf|otf|zip|gz|xz|zst|tgz|tar|patch|pdf)$' ||
+  true
+)
+if [ "${#FILES[@]}" -eq 0 ]; then
+  echo "safety: no staged text files to scan"
+  exit 0
+fi
+
+# Paths must be repo-relative -> check-safety resolves ROOT itself; feed absolute.
+args=()
+for f in "${FILES[@]}"; do args+=("$ROOT/$f"); done
+
+if ! "$ROOT/scripts/check-safety.sh" --paths "${args[@]}"; then
+  echo "pre-commit: safety check FAILED. Fix the violations above (AGENTS.md §1)." >&2
+  echo "  To bypass ONLY when you have reviewed the risk (last resort):" >&2
+  echo "    git commit --no-verify   # discouraged; CI still enforces this" >&2
+  exit 1
+fi
+exit 0

@@ -44,8 +44,9 @@ pub const Viewport = struct {
 };
 
 /// A grid position (screen-tag coords; x=col, y=row, origin top-left). The TUI cursor.
-/// render()'s `cursor` param exists so the signature matches the contract; v1 leaves the
-/// terminal cursor hidden (app.zig enter() emits `\x1b[?25l`) — positional use is deferred.
+/// render() paints the cell at `cursor` in reverse video (a copy-mode block cursor) so it's
+/// always visible — even before any selection is started. app.zig keeps the terminal's own
+/// cursor hidden (`\x1b[?25l`) because view fully repaints every cell each frame.
 pub const Pos = struct { x: u32, y: u32 };
 
 /// A visual selection in grid coords. Either endpoint may be the geometric top-left;
@@ -108,8 +109,9 @@ pub const SearchMode = enum { fixed };
 /// `pal`       — the cached palette (palette.Colors). Palette-INDEX cell colors are emitted
 ///               as explicit RGB pinned to pal.palette (colors match the source pane).
 /// `viewport`  — { cols, rows, scroll }: the visible window.
-/// `cursor`    — the TUI cursor (grid coords). Unused in v1 (app.zig hides the terminal
-///               cursor); param exists so the signature matches the contract.
+/// `cursor`    — the TUI cursor (grid coords). The cell at (cursor.x,cursor.y) within the
+///               viewport is painted in reverse video (a copy-mode block cursor), so the
+///               cursor is always visible even with no active selection.
 /// `selection` — ?Selection: the active visual selection (null = none). Reversed.
 /// `matches`   — []const Match: search hits to reverse-highlight (empty = none).
 pub fn render(
@@ -184,6 +186,13 @@ pub fn render(
             const hi = highlight(gx, gy, selection, matches);
             var s = cellStyle(page, &cell);
             s.flags.inverse = s.flags.inverse ^ hi;
+            // Copy-mode block cursor: force the cursor cell to reverse video so it is ALWAYS
+            // visible, even before a selection is started (otherwise the only cue was counting
+            // j/k presses). This takes PRECEDENCE over the selection/match XOR above, so the
+            // cursor can never be canceled back to invisible. Safe with an active selection:
+            // select.zig keeps extent = anchor..cursor, so the cursor is always an ENDPOINT
+            // (a boundary cell), never a selection interior — this only re-emphasizes the edge.
+            if (gy == cursor.y and gx == cursor.x) s.flags.inverse = true;
 
             if (last == null or !s.eql(last.?)) {
                 // REUSE Style.formatterVt() — it always emits \x1b[0m first (self-contained
@@ -199,7 +208,6 @@ pub fn render(
     }
 
     try out.writeAll("\x1b[0m"); // leave the terminal's SGR state clean
-    _ = cursor; // v1: cursor is hidden (app.zig enter()); positional use deferred.
 }
 
 // ---- S2 status line entry point (PRD §7.1 — paints the LAST tty row) -----------
@@ -892,7 +900,9 @@ fn renderOwned(
         t.screens.active,
         palette.defaultColors(),
         viewport,
-        .{ .x = 0, .y = 0 },
+        // Off-grid cursor: the content/selection/match/viewport assertions below are about the
+        // GRID paint, so they must NOT be perturbed by the (separately tested) cursor highlight.
+        .{ .x = 0, .y = std.math.maxInt(u32) },
         selection,
         matches,
     );
@@ -1113,5 +1123,60 @@ test "render: full-color grid, selection, match, viewport cap, wide char, below-
         try std.testing.expectEqual(@as(u32, 0), m[1].y);
         try std.testing.expectEqual(@as(u32, 2), m[1].x1);
         try std.testing.expectEqual(@as(u32, 3), m[1].x2);
+    }
+
+    // (m) cursor visibility (no selection): the cell under the cursor is painted reverse (a
+    //     copy-mode block cursor) so the user always sees where they are. Built inline (NOT via
+    //     renderOwned, which pins an OFF-GRID cursor) because this case needs the cursor ON-grid.
+    //     Cursor on 'B' (x=1,y=0) over "AB" ⇒ 'B' is reverse; both glyphs still render.
+    {
+        var t = try Terminal.init(alloc, .{ .cols = 10, .rows = 2 });
+        defer t.deinit(alloc);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("AB") |c| {
+            if (c == '\n') try stream.next('\r');
+            try stream.next(c);
+        }
+        var aw = try std.Io.Writer.Allocating.initCapacity(alloc, 4096);
+        defer aw.deinit();
+        try render(
+            &aw.writer,
+            t.screens.active,
+            palette.defaultColors(),
+            .{ .cols = 10, .rows = 2, .scroll = 0 },
+            .{ .x = 1, .y = 0 },
+            null,
+            &[_]Match{},
+        );
+        const out = try alloc.dupe(u8, aw.writer.buffered());
+        defer alloc.free(out);
+        try std.testing.expect(std.mem.indexOf(u8, out, "\x1b[7m") != null); // 'B' cursor is reverse
+        try std.testing.expect(std.mem.indexOf(u8, out, "A") != null);
+        try std.testing.expect(std.mem.indexOf(u8, out, "B") != null);
+    }
+
+    // (n) cursor on a BLANK trailing cell (past the row's written content) still renders a
+    //     visible reverse-video block — the cursor must never vanish on empty space.
+    {
+        var t = try Terminal.init(alloc, .{ .cols = 10, .rows = 2 });
+        defer t.deinit(alloc);
+        var stream = t.vtStream();
+        defer stream.deinit();
+        for ("A") |c| try stream.next(c); // only col 0 written; cursor lands on blank col 5
+        var aw = try std.Io.Writer.Allocating.initCapacity(alloc, 4096);
+        defer aw.deinit();
+        try render(
+            &aw.writer,
+            t.screens.active,
+            palette.defaultColors(),
+            .{ .cols = 10, .rows = 2, .scroll = 0 },
+            .{ .x = 5, .y = 0 },
+            null,
+            &[_]Match{},
+        );
+        const out = try alloc.dupe(u8, aw.writer.buffered());
+        defer alloc.free(out);
+        try std.testing.expect(std.mem.indexOf(u8, out, "\x1b[7m") != null); // reverse block on blank
     }
 }
