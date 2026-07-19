@@ -1342,6 +1342,26 @@ test "writeEscaped: escapes & < > \" ' and passes through safe bytes" {
     try std.testing.expectEqualStrings("a&lt;b&gt;&amp;&quot;&#x27;\xc2\xa3", aw.writer.buffered());
 }
 
+test "renderGrid escapes --font into <pre style> (Issue 2: attribute-injection XSS)" {
+    // A " in the font value must NOT break out of the double-quoted style attribute.
+    var aw = try std.Io.Writer.Allocating.initCapacity(std.testing.allocator, 1 << 16);
+    defer aw.deinit();
+    try renderGrid(
+        std.testing.allocator,
+        "x\n",
+        .{ .cols = 1, .rows = 1 },
+        palette.defaultColors(),
+        null,
+        "a\" onmouseover=\"alert(1)", // XSS payload
+        &aw.writer,
+    );
+    const got = aw.writer.buffered();
+    // (1) font value is HTML-entity-escaped inside the style attribute:
+    try std.testing.expect(std.mem.indexOf(u8, got, "font-family: a&quot; onmouseover=&quot;alert(1);") != null);
+    // (2) no raw attribute breakout: the payload never becomes a real HTML attribute:
+    try std.testing.expect(std.mem.indexOf(u8, got, "onmouseover=\"alert") == null);
+}
+
 test "writeDocument: full §8.1 envelope (DOCTYPE first, charset first in head, title escaped)" {
     // Fragment callback that emits a canned <pre> (no Terminal => no cross-test GOTCHA).
     const Ctx = struct {

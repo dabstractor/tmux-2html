@@ -42,7 +42,7 @@ For installation and a feature overview, see the `README.md`.
 | `@tmux-2html-visible-key` | *(empty)* | Prefix key: capture the visible pane only. Unbound by default. |
 | `@tmux-2html-output-dir` | `${XDG_DATA_HOME:-~/.local/share}/tmux-2html` | Directory where rendered HTML files are written. |
 | `@tmux-2html-open` | `on` | If `on`, run `xdg-open` on the HTML file after writing it. |
-| `@tmux-2html-font` | `monospace` | CSS `font-family` used in the rendered HTML. |
+| `@tmux-2html-font` | `monospace` | CSS `font-family` used in the rendered HTML. The value is HTML-escaped when emitted into the `style` attribute, so a font name containing `"` or other markup characters cannot inject attributes or scripts. |
 | `@tmux-2html-history-limit` | `50000` | Maximum number of scrollback lines captured per pane. |
 | `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory containing the `tmux-2html` binary. |
 | `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html — <session>/<window>.<pane> <iso8601>` for `pane`/`region`; `tmux-2html` for `render`). |

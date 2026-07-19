@@ -838,7 +838,21 @@ pub const PageFormatter = struct {
                 ) catch return error.WriteFailed;
 
                 const font = self.opts.font orelse "monospace";
-                buf_writer.print("font-family: {s};", .{font}) catch return error.WriteFailed;
+                // Issue 2 (P1.M1.T2.S1): HTML-escape the font value into the double-quoted
+                // style attribute. A raw " breaks out and allows attribute/event-handler
+                // injection (stored-XSS) in the shared HTML (PRD §8.1 trust). Escape set
+                // matches writeEscaped (render.zig). Single per-byte pass: each input byte
+                // maps to one output, so no double-encoding. Default "monospace" is safe.
+                buf_writer.writeAll("font-family: ") catch return error.WriteFailed;
+                for (font) |c| switch (c) {
+                    '"' => buf_writer.writeAll("&quot;") catch return error.WriteFailed,
+                    '&' => buf_writer.writeAll("&amp;") catch return error.WriteFailed,
+                    '<' => buf_writer.writeAll("&lt;") catch return error.WriteFailed,
+                    '>' => buf_writer.writeAll("&gt;") catch return error.WriteFailed,
+                    '\'' => buf_writer.writeAll("&#x27;") catch return error.WriteFailed,
+                    else => buf_writer.writeByte(c) catch return error.WriteFailed,
+                };
+                buf_writer.writeAll(";") catch return error.WriteFailed;
 
                 buf_writer.writeAll("\">") catch return error.WriteFailed;
 
