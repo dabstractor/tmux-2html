@@ -4,14 +4,14 @@
       "type": "Phase",
       "id": "P1",
       "title": "Complete §8.1 — HTML Document Envelope Configurability & Validation",
-      "status": "Planned",
+      "status": "Complete",
       "description": "DELTA PLAN (PRD v1 → v2). The PRD added §8.1 'HTML document envelope': every HTML output must be a complete, valid HTML5 document (<!DOCTYPE html>…</html>), never a bare <pre> fragment. The CORE envelope is ALREADY implemented & tested in commit 07ab167 (render.zig DocumentOpts/writeDocument/renderDocument; all render/pane/region output paths route through it; testdata/*.html re-blessed as complete docs; golden_test asserts the full document byte-for-byte — verified: build ✅, test ✅, runtime smoke ✅, no production path emits a bare fragment). This phase closes §8.1's REMAINING normative gaps: the title/lang CONFIGURABILITY that §8.1 normatively requires (--title / @tmux-2html-title override; @tmux-2html-lang / locale-derived lang), then validates end-to-end and syncs docs. Do NOT re-implement the existing core envelope (see plan/002_e3d8d22c088d/architecture/system_context.md + envelope_gap_analysis.md).",
       "milestones": [
         {
           "type": "Milestone",
           "id": "P1.M1",
           "title": "§8.1 Configurability, Validation & Documentation",
-          "status": "Planned",
+          "status": "Complete",
           "description": "Land the §8.1 normative configurability (title override + lang resolution), wire it through the binary and the tmux plugin, validate the full document holds across every output path (goldens unchanged + isolated-tmux integration, PRD §0 safety), and sync changeset-level docs.",
           "tasks": [
             {
@@ -151,14 +151,14 @@
               "type": "Task",
               "id": "P1.M1.T4",
               "title": "Sync changeset-level documentation (README overview)",
-              "status": "Planned",
+              "status": "Complete",
               "description": "Mode B final task: sweep the changeset-level overview doc (README.md) so the §8.1 delta ships with a coherent, non-stale feature description. Per-file touched docs (--help, CONFIGURATION options) already rode with the implementing subtasks (P1.M1.T1.S1, P1.M1.T2.S1). This task depends on ALL implementing subtasks and runs last.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T4.S1",
                   "title": "README.md: surface standalone complete-HTML5-document output + title/lang config",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",

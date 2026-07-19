@@ -7,6 +7,11 @@ self-contained HTML file that preserves the terminal colors. The file opens in
 a browser, so you can share, archive, or screenshot a pane without an external
 screenshot tool.
 
+Every capture is a complete, valid HTML5 document — a single
+`<!DOCTYPE html>`…`</html>` with a `<head>` (charset, viewport, and an
+HTML-escaped `<title>`) and a `<body>` whose page background matches the
+terminal's, so it opens cleanly in any browser with no wrapping page.
+
 ## Capture modes
 
 tmux-2html offers three capture modes:
@@ -118,6 +123,12 @@ Render piped ANSI to a file:
 tmux-2html render < ansi.txt > out.html
 ```
 
+Set the document title and language (each subcommand also accepts `--help`):
+
+```sh
+tmux-2html render --title "build log" --lang en-US < ansi.txt > out.html
+```
+
 Exit codes: `0` success, `1` usage or runtime error, `2` capture or target
 error.
 
@@ -136,9 +147,14 @@ before the TPM `run` line.
 | `@tmux-2html-font` | `monospace` | CSS `font-family` in the rendered HTML. |
 | `@tmux-2html-history-limit` | `50000` | Max scrollback lines captured per pane. |
 | `@tmux-2html-binary-dir` | `$TMUX_2HTML_BIN` | Directory holding the binary. |
+| `@tmux-2html-title` | *(empty)* | Document `<title>`. Empty ⇒ the contextual default (`tmux-2html` for `render`; a title including the session name, pane id, and a Unix timestamp for `pane`/`region`). |
+| `@tmux-2html-lang` | *(empty)* | `<html lang>` attribute (BCP-47). Empty ⇒ derived from the locale (`LC_ALL`/`LC_MESSAGES`/`LANG`), falling back to `en`. |
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full options
-reference, the palette cache, and sync-palette behavior.
+Every capture is a complete HTML5 document (see above). The `<title>` and
+`<html lang>` are configurable: set `@tmux-2html-title` /
+`@tmux-2html-lang`, or pass `--title` / `--lang` on the command line (the CLI
+flags override the options). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+for the full options reference, the palette cache, and sync-palette behavior.
 
 ## Known limitations
 
