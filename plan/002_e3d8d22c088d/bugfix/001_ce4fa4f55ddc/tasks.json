@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Security & Correctness Bug Fixes",
-      "status": "Researching",
+      "status": "Complete",
       "description": "Fix the 4 issues identified in the end-to-end validation of the §8.1 HTML Document Envelope: 2 Major (shell-quoting failure in plugin bindings, HTML attribute injection via --font) and 2 Minor (render --output missing parent dir creation, --lang empty string locale derivation). All fixes are surgical, grounded in verified codebase locations, and each includes adversarial test coverage for the previously-unexercised shell-quoting and HTML-attribute boundaries.",
       "milestones": [
         {
@@ -67,7 +67,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Fix Minor Issues & Sync Documentation",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Fix the two Minor severity issues: (3) render --output does not create parent directories (inconsistency with pane/region); (4) --lang explicit empty string yields 'en' rather than deriving from locale. Then sync all changeset-level documentation (README.md, docs/CONFIGURATION.md) to reflect the security and behavior improvements from both milestones.",
           "tasks": [
             {
@@ -118,14 +118,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Sync changeset-level documentation",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Final documentation sweep to ensure README.md and docs/CONFIGURATION.md reflect all security and behavior improvements from this changeset. Per §5 Mode B, this is the catch-all for cross-cutting docs that only make sense once the whole changeset is in place.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Update README.md and docs/CONFIGURATION.md with changeset summary",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",

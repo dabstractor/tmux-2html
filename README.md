@@ -11,6 +11,10 @@ Every capture is a complete, valid HTML5 document — a single
 `<!DOCTYPE html>`…`</html>` with a `<head>` (charset, viewport, and an
 HTML-escaped `<title>`) and a `<body>` whose page background matches the
 terminal's, so it opens cleanly in any browser with no wrapping page.
+Every user-supplied string that reaches the HTML — the document `<title>`
+and the CSS `font-family` set by `--font` / `@tmux-2html-font` — is
+HTML-escaped, so a crafted value can never inject markup, attributes, or
+scripts into a capture you share.
 
 ## Capture modes
 
