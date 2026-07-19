@@ -545,6 +545,7 @@ pub fn renderToFileAtomic(
     doc: DocumentOpts,
 ) !void {
     const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
+    std.fs.cwd().makePath(dir_path) catch {}; // Issue 3: ensure parent dirs exist (idempotent; openDir below reports the real failure)
     const base = std.fs.path.basename(path);
 
     // Name the temp `.{base}.{rand}.tmp` next to `{base}` (same dir => same filesystem).
@@ -601,6 +602,7 @@ fn selectionBodyEmpty(html: []const u8) bool {
 /// Mirrors `renderToFileAtomic`'s atomic idiom but for already-rendered fragment bytes.
 fn writeDocFileAtomic(alloc: std.mem.Allocator, path: []const u8, doc: DocumentOpts, fragment_bytes: []const u8) !void {
     const dir_path = std.fs.path.dirname(path) orelse "."; // null for bare filenames
+    std.fs.cwd().makePath(dir_path) catch {}; // Issue 3: ensure parent dirs exist (idempotent)
     const base = std.fs.path.basename(path);
 
     var rnd: [4]u8 = undefined;
@@ -1327,6 +1329,30 @@ test "writeFileAtomic: writes target, leaves no .tmp" {
     // guarantee is structural (rename is the last step; errdefer deletes the temp on any error)
     // and is proven end-to-end by the Level-3 integration check.
     _ = try tmp.dir.statFile("out.html");
+}
+
+test "writeDocFileAtomic: creates nested parent dirs (Issue 3: render --output)" {
+    // writeDocFileAtomic shares the IDENTICAL dir_path + openDir structure as renderToFileAtomic,
+    // so it proves the makePath fix for the atomic-write idiom. It does NOT touch Terminal
+    // (render.zig:838 GOTCHA), so it is safe as its own test fn — unlike renderToFileAtomic.
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+    // nested/deep/ does NOT exist under tmp — makePath must create it.
+    const nested = try std.fmt.allocPrint(alloc, "{s}/nested/deep/out.html", .{dir_abs});
+    defer alloc.free(nested);
+    try writeDocFileAtomic(alloc, nested, .{ .title = "t" }, "<pre>NESTED</pre>");
+
+    // File created with a valid §8.1 document (DOCTYPE first, fragment present, closes </html>).
+    var f = try tmp.dir.openFile("nested/deep/out.html", .{});
+    defer f.close();
+    const got = try f.readToEndAlloc(alloc, 1 << 16);
+    defer alloc.free(got);
+    try std.testing.expect(std.mem.startsWith(u8, got, "<!DOCTYPE html>"));
+    try std.testing.expect(std.mem.indexOf(u8, got, "<pre>NESTED</pre>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "</html>") != null);
 }
 
 // ---- §8.1 HTML document envelope unit tests (PURE/IO-only -> separate test fns) ----
