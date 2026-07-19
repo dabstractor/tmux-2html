@@ -277,21 +277,40 @@ fn langFromEnvStrings(lc_all: ?[]const u8, lc_messages: ?[]const u8, lang: ?[]co
 }
 
 /// Locale-only resolution (precedence + transform + fallback). Reads the process
-/// environment via std.posix.getenv (same pattern as tempHtmlPath at :565). NO /dev/tty.
+/// environment via std.posix.getenv. NO /dev/tty.
 pub fn langFromEnv() []const u8 {
-    return langFromEnvStrings(
+    return resolveLangImpl(
+        null,
         std.posix.getenv("LC_ALL"),
         std.posix.getenv("LC_MESSAGES"),
         std.posix.getenv("LANG"),
     );
 }
 
-/// Resolve the <html lang> value (PRD §8.1). Explicit --lang / @tmux-2html-lang
-/// wins; an explicit invalid value (e.g. "C", "english") degrades defensively to
-/// "en". Otherwise derive from the locale; else "en".
+/// Resolve the <html lang> value (PRD §8.1). Explicit --lang / @tmux-2html-lang wins;
+/// an EMPTY explicit value (--lang "") is treated as UNSET and derives from the locale
+/// (Issue 4: previously it forced "en"). An explicit invalid value (e.g. "C", "english")
+/// degrades defensively to "en". Otherwise derive from the locale; else "en".
 pub fn resolveLang(explicit: ?[]const u8) []const u8 {
-    if (explicit) |e| return toBcp47(e) orelse "en";
-    return langFromEnv();
+    return resolveLangImpl(
+        explicit,
+        std.posix.getenv("LC_ALL"),
+        std.posix.getenv("LC_MESSAGES"),
+        std.posix.getenv("LANG"),
+    );
+}
+
+/// Pure core shared by resolveLang + langFromEnv (Issue 4). An explicit NON-EMPTY value
+/// wins (invalid -> "en"); an EMPTY explicit value is treated as UNSET and derives from
+/// LC_ALL -> LC_MESSAGES -> LANG -> "en" (same as null). Param-taking so it is deterministic
+/// & unit-testable without mutating process env (Zig 0.15.2 std has no setenv; link_libc=false).
+/// Mirrors the langFromEnv/langFromEnvStrings pub-reader + pure-helper precedent.
+fn resolveLangImpl(explicit: ?[]const u8, lc_all: ?[]const u8, lc_messages: ?[]const u8, lang: ?[]const u8) []const u8 {
+    if (explicit) |e| {
+        if (e.len == 0) return langFromEnvStrings(lc_all, lc_messages, lang); // Issue 4: empty explicit == unset
+        return toBcp47(e) orelse "en";
+    }
+    return langFromEnvStrings(lc_all, lc_messages, lang);
 }
 
 /// HTML-escape `s` into `out` (PRD §8.1: <title> etc. is HTML-escaped; cell text stays
@@ -1603,4 +1622,37 @@ test "resolveLang: explicit null falls to env (non-empty result)" {
     // langFromEnv() reads the real host env (not deterministic); just assert validity.
     const got = resolveLang(null);
     try std.testing.expect(got.len > 0);
+}
+
+// ---- resolveLangImpl: Issue 4 (empty explicit == unset -> locale-derived) ----
+
+test "resolveLangImpl: empty explicit derives from locale (Issue 4)" {
+    // The bug: resolveLang("") used to force "en" (toBcp47("") -> null -> orelse "en").
+    // The fix: empty explicit is treated as unset -> locale derivation.
+    try std.testing.expectEqualStrings("de-DE", resolveLangImpl(@as(?[]const u8, ""), null, null, "de_DE.UTF-8"));
+}
+
+test "resolveLangImpl: empty explicit == null (identical locale path)" {
+    // Empty and unset take the SAME code path -> identical result, for any locale.
+    try std.testing.expectEqualStrings(
+        resolveLangImpl(null, null, null, "pt_BR.UTF-8"),
+        resolveLangImpl(@as(?[]const u8, ""), null, null, "pt_BR.UTF-8"),
+    );
+}
+
+test "resolveLangImpl: empty explicit + no locale -> en" {
+    try std.testing.expectEqualStrings("en", resolveLangImpl(@as(?[]const u8, ""), null, null, null));
+    try std.testing.expectEqualStrings("en", resolveLangImpl(@as(?[]const u8, ""), "", "", ""));
+}
+
+test "resolveLangImpl: non-empty invalid still -> en (unchanged by Issue 4 fix)" {
+    // Explicit invalid (C/english) still forces "en" — the fix does NOT change non-empty behavior,
+    // and an explicit value still WINS over the locale (no cascade to LANG).
+    try std.testing.expectEqualStrings("en", resolveLangImpl("C", null, null, "de_DE.UTF-8"));
+    try std.testing.expectEqualStrings("en", resolveLangImpl("english", "de_DE.UTF-8", null, null));
+}
+
+test "resolveLangImpl: non-empty valid wins over locale (unchanged)" {
+    try std.testing.expectEqualStrings("fr", resolveLangImpl("fr", "de_DE.UTF-8", null, null));
+    try std.testing.expectEqualStrings("en-US", resolveLangImpl("en_US.UTF-8", null, null, "de_DE"));
 }

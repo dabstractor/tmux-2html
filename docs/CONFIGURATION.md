@@ -87,6 +87,11 @@ rather than re-reading them. You can also pass `--title`/`--lang` yourself when 
 binary standalone. Values containing special characters (including apostrophes) are POSIX
 shell-escaped in the generated bindings, so a title like `Bob's pane` is safe.
 
+Passing `--lang ""` (an explicit empty string) is treated the same as omitting the flag: the
+`<html lang>` value is derived from your locale (`LC_ALL` → `LC_MESSAGES` → `LANG`), falling back
+to `en`. (An explicit non-empty value that fails to parse as a BCP-47 tag — e.g. `C` — still falls
+back to `en`.)
+
 ## The region overlay
 
 `prefix C-o` (the `@tmux-2html-region-key`) opens the region overlay: a

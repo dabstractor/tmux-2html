@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Security & Correctness Bug Fixes",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Fix the 4 issues identified in the end-to-end validation of the §8.1 HTML Document Envelope: 2 Major (shell-quoting failure in plugin bindings, HTML attribute injection via --font) and 2 Minor (render --output missing parent dir creation, --lang empty string locale derivation). All fixes are surgical, grounded in verified codebase locations, and each includes adversarial test coverage for the previously-unexercised shell-quoting and HTML-attribute boundaries.",
       "milestones": [
         {
@@ -67,7 +67,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Fix Minor Issues & Sync Documentation",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Fix the two Minor severity issues: (3) render --output does not create parent directories (inconsistency with pane/region); (4) --lang explicit empty string yields 'en' rather than deriving from locale. Then sync all changeset-level documentation (README.md, docs/CONFIGURATION.md) to reflect the security and behavior improvements from both milestones.",
           "tasks": [
             {
@@ -96,14 +96,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Treat --lang empty string as locale-derived (Issue 4)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Fix the behavior where `--lang \"\"` (explicit empty string) yields 'en' instead of deriving from the locale. The CLI parser sets opts.lang to Some(\"\") for --lang \"\", which resolveLang treats as an explicit value, calls toBcp47(\"\") which returns null (length < 2), and falls back to 'en'. An explicit empty should mean 'derive from locale' (same as omitting the flag), consistent with how the plugin omits --lang when the option is unset.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "Modify resolveLang to treat empty explicit as locale-derived with unit test",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See architecture/system_context.md §Issue 4 and architecture/external_deps.md §Zig optional string handling. The bug is in src/render.zig lines 292-294: `pub fn resolveLang(explicit: ?[]const u8) []const u8 { if (explicit) |e| return toBcp47(e) orelse \"en\"; return langFromEnv(); }`. When --lang \"\" is passed, cli.zig sets opts.lang = @as(?[]const u8, \"\") (non-null, empty slice). resolveLang unwraps it to e=\"\", calls toBcp47(\"\") which returns null (lang_src.len < 2), and falls back to \"en\" — skipping locale derivation. The fix: treat empty explicit the same as null/unset. langFromEnv() at line 286 reads LC_ALL > LC_MESSAGES > LANG > \"en\".\n2. INPUT: The existing src/render.zig file. resolveLang at line 292-294. toBcp47 at line 221. langFromEnv at line 286 (calls langFromEnvStrings at line 269). The existing unit tests for toBcp47 at lines 1479-1497 and writeEscaped at line 1338 (pattern reference for test structure).\n3. LOGIC: (a) In resolveLang (render.zig:292), add an empty-string guard before the toBcp47 call: if explicit is non-null but the unwrapped value has length 0, fall through to langFromEnv(). The modified function: `pub fn resolveLang(explicit: ?[]const u8) []const u8 { if (explicit) |e| { if (e.len == 0) return langFromEnv(); return toBcp47(e) orelse \"en\"; } return langFromEnv(); }`. (b) Add a unit test in src/render.zig: set up environment with LANG=de_DE.UTF-8 (and LC_ALL/LC_MESSAGES unset), call resolveLang(@as(?[]const u8, \"\")), assert it returns \"de-DE\" (locale-derived, not \"en\"). NOTE: langFromEnv reads the process env directly via std.posix.getenv, so the test may need to set the env var — check if existing tests mock env or if resolveLang can be tested via langFromEnvStrings instead. If env mocking is impractical in unit tests, test langFromEnvStrings(\"\", \"\", \"de_DE.UTF-8\") returns \"de-DE\" (the underlying pure function that resolveLang delegates to). (c) Also verify the existing resolveLang behavior for non-empty invalid (e.g. resolveLang(\"C\") still returns \"en\") is unchanged. (d) Run `zig build test --release=fast` to confirm.\n4. OUTPUT: Modified src/render.zig with resolveLang treating empty explicit as locale-derived. New unit test proving locale derivation works for empty explicit. The non-empty behavior (explicit invalid → \"en\") is unchanged.\n5. DOCS: [Mode A] Update docs/CONFIGURATION.md §@tmux-2html-lang / --lang to clarify that an empty explicit value (--lang \"\") is treated as unset and falls back to locale derivation. This rides WITH the work, do not create a separate docs subtask.",
@@ -118,14 +118,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Final documentation sweep to ensure README.md and docs/CONFIGURATION.md reflect all security and behavior improvements from this changeset. Per §5 Mode B, this is the catch-all for cross-cutting docs that only make sense once the whole changeset is in place.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Update README.md and docs/CONFIGURATION.md with changeset summary",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
