@@ -312,7 +312,7 @@ const render_help =
     \\  --palette MODE      default | cached | live  (default: cached->live->default)
     \\  --output FILE       write here instead of stdout
     \\  --open              xdg-open the output (implies --output if none given)
-    \\  --selection X1,Y1,X2,Y2[,rect]   render only a sub-grid (rect=1 -> block)
+    \\  --selection X1,Y1,X2,Y2[,1]   render only a sub-grid (trailing 1 = block/rectangular)
     \\  --help              show this help
     \\
     \\Exit codes: 0 success, 1 usage/runtime error, 2 size/terminal error.
@@ -381,7 +381,7 @@ fn reportError(sub: []const u8, err: ParseError) !void {
         error.UnknownFlag => "unknown or unexpected argument",
         error.InvalidNumber => "invalid numeric value",
         error.BadPaletteMode => "--palette must be default|cached|live",
-        error.BadSelection => "--selection must be X1,Y1,X2,Y2[,rect]",
+        error.BadSelection => "--selection must be X1,Y1,X2,Y2[,1]",
         error.BadPaletteSource => "--from must be 'tty' or 'file PATH'",
         error.MutualExclusivity => "--visible and --full are mutually exclusive",
     };

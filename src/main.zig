@@ -213,12 +213,20 @@ fn syncPaletteDir(
         },
         .file => |path| {
             label = "loaded";
-            colors = palette.loadColorsFile(allocator, path) catch return .{ .code = 1, .summary =
-                try std.fmt.allocPrint(
-                    allocator,
-                    "error: cannot read palette file '{s}'",
-                    .{path},
-                ) };
+            colors = palette.loadColorsFile(allocator, path) catch |err| switch (err) {
+                error.MalformedLine => return .{ .code = 1, .summary =
+                    try std.fmt.allocPrint(
+                        allocator,
+                        "error: malformed palette file '{s}' (expected \"INDEX R G B\" per line)",
+                        .{path},
+                    ) },
+                else => return .{ .code = 1, .summary =
+                    try std.fmt.allocPrint(
+                        allocator,
+                        "error: cannot read palette file '{s}'",
+                        .{path},
+                    ) },
+            };
         },
     }
 

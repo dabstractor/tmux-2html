@@ -48,6 +48,8 @@ under_scripts() { case "$1" in "$ROOT/scripts/"*|"$ROOT/scripts") return 0;; *) 
 under_plan() { case "$1" in "$ROOT/plan/"*|"$ROOT/plan") return 0;; *) return 1;; esac; }
 
 # Return 0 (skip) when a line is documentation/comment/search-context, not code.
+# (Standalone test on one line — does NOT see surrounding context. Use is_doc_line()
+# below for the context-aware per-file classification.)
 should_skip() {
   local l="$1" s c
   case "$l" in *'`'*) return 0;; esac                       # backtick span => prose
@@ -62,6 +64,64 @@ should_skip() {
   return 1
 }
 
+# is_doc_line <line> : same heuristics as should_skip(), plus a soft-indent
+# continuation rule — a line whose first non-space char is NOT a list bullet but which
+# is indented relative to a preceding skipped doc line is treated as that line's wrapped
+# continuation (inherits doc classification). This is what keeps wrapped markdown prose
+# like "  ... NEVER kill-server ..." from tripping FAIL on the literal pattern name.
+# (Context is supplied by the caller via _DOC_CTX: 1 = last non-blank line was doc.)
+is_doc_line() {
+  local l="$1" s c leading
+  s="${l#"${l%%[![:space:]]*}"}"                             # left-trimmed
+  # Continuation/wrapped line of a doc block: indented (leading whitespace) and not a
+  # bullet itself, while the immediately preceding non-blank line was classified as doc.
+  leading="${l%%[![:space:]]*}"
+  if [ -n "$leading" ] && [ "${_DOC_CTX:-0}" = 1 ]; then
+    c="${s:0:1}"
+    case "$c" in
+      '-') [ "${s:1:1}" = ' ' ] || return 0;;            # a new bullet is NOT a continuation
+      '*' ) [ "${s:1:1}" = ' ' ] || return 0;;
+      *) return 0;;                                     # indented wrapped prose => doc
+    esac
+  fi
+  should_skip "$l"
+}
+
+# Compute the sorted list of line numbers that are documentation context for a file.
+# Walks the file top-to-bottom tracking whether the previous non-blank line was doc, so
+# wrapped continuations inherit classification. Lines inside a fenced code block
+# (``` ... ```) are always doc. Output: one line-number per doc line.
+doc_lines_of() {
+  local f="$1" ln=0 in_fence=0 line trimmed
+  _DOC_CTX=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    ln=$((ln+1))
+    # blank lines neither emit nor reset doc context (they just separate paragraphs)
+    if [ -z "${line//[[:space:]]/}" ]; then continue; fi
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    # fenced code block toggle: a line whose first chars are ``` (or ~~~)
+    case "$trimmed" in
+      '```'*|'~~~'*)
+        if [ "$in_fence" = 1 ]; then in_fence=0; else in_fence=1; fi
+        printf '%s\n' "$ln"   # the fence line itself is doc
+        _DOC_CTX=1
+        continue
+        ;;
+    esac
+    if [ "$in_fence" = 1 ]; then
+      printf '%s\n' "$ln"     # content inside a code block is doc
+      _DOC_CTX=1
+      continue
+    fi
+    if is_doc_line "$line"; then
+      printf '%s\n' "$ln"
+      _DOC_CTX=1
+    else
+      _DOC_CTX=0
+    fi
+  done < "$f"
+}
+
 fails=0; warns=0
 emit() { # sev rel line text
   printf '  [%s] %s:%s: %s\n' "$1" "$2" "$3" "$4"
@@ -70,17 +130,24 @@ emit() { # sev rel line text
 
 # scan_pat <sev> <pattern> <file> <rel> [mode]
 # mode "killserver" => only FAIL when the line has no isolated `-L <sock>`.
+# Doc classification uses the precomputed _DOCFILE (newline-separated line numbers).
 scan_pat() {
   local sev="$1" pat="$2" f="$3" rel="$4" mode="${5:-}" line ln txt
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     ln="${line%%:*}"; txt="${line#*:}"
-    should_skip "$txt" && continue
+    is_doc_member "$ln" && continue
     if [ "$mode" = "killserver" ]; then
       case "$txt" in *-L*) continue;; esac    # scoped to an isolated socket => safe
     fi
     emit "$sev" "$rel" "$ln" "$txt"
   done < <(grep -InE "$pat" "$f" 2>/dev/null || true)
+}
+
+# is_doc_member <lineno> : 0 (doc) if <lineno> appears in the precomputed _DOCFILE set.
+is_doc_member() {
+  [ -n "${_DOCFILE:-}" ] || return 1
+  grep -qxF "$1" "$_DOCFILE" 2>/dev/null
 }
 
 # R3 combo: a file that BOTH prepends to PATH and has an exec/>> sink.
@@ -91,7 +158,7 @@ shim_combo() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     ln="${line%%:*}"; txt="${line#*:}"
-    should_skip "$txt" && continue
+    is_doc_member "$ln" && continue
     emit WARN "$rel" "$ln" "PATH-prepend shim recipe (prefer scripts/with-tmux-audit.sh): $txt"
   done < <(grep -InE 'PATH="[^"]*:\$PATH"|PATH=[^:]*:\$PATH' "$f" 2>/dev/null || true)
 }
@@ -115,6 +182,8 @@ while IFS= read -r f; do
   is_text "$f" || continue
   [ "$(readlink -f "$f" 2>/dev/null || echo "$f")" = "$SELF" ] && continue   # don't scan self
   rel="${f#$ROOT/}"
+  _DOCFILE="$(mktemp)"
+  doc_lines_of "$f" > "$_DOCFILE" 2>/dev/null || true
   scan_pat FAIL "$R1_KILL"   "$f" "$rel"
   scan_pat FAIL 'kill-server' "$f" "$rel" killserver
   scan_pat FAIL "$R2"        "$f" "$rel"
@@ -122,6 +191,7 @@ while IFS= read -r f; do
     shim_combo "$f" "$rel"
     scan_pat WARN "$R4"      "$f" "$rel"
   fi
+  rm -f "$_DOCFILE"; unset _DOCFILE
 done < <(collect_files)
 
 echo
