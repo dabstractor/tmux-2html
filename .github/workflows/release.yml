@@ -24,10 +24,17 @@ jobs:
       matrix:
         include:
           # PRD-triple (asset/artifact name) | Zig -Dtarget            | runner         | -Dsimd=false
+          # macOS runners PINNED to macos-15 (NOT macos-latest): macos-latest now resolves to a
+          # macOS-26 image whose default Xcode 26.4 SDK trips an upstream Zig 0.15.2 build-runner
+          # link bug (undefined libSystem symbols; zig build fails before any project code links).
+          # macos-15 ships ONLY Xcode 16.x (SDK 15.x) per GitHub's one-major-Xcode-per-macOS
+          # policy, which Zig 0.15.2 links cleanly. See ziglang/zig#31658, ghostty-org/ghostty#11991.
+          # Bump only after migrating the build off Zig 0.15.2. (arm64 runner still cross-compiles
+          # the x86_64-macos target fine; `zig build` only needs the host build runner to link.)
           - { triple: linux-x86_64,  os: ubuntu-latest, target: x86_64-linux-gnu,  flags: ""              }
           - { triple: linux-aarch64, os: ubuntu-latest, target: aarch64-linux-gnu, flags: "-Dsimd=false" }
-          - { triple: macos-x86_64,  os: macos-latest,  target: x86_64-macos,      flags: "-Dsimd=false" }
-          - { triple: macos-arm64,   os: macos-latest,  target: aarch64-macos,     flags: ""              }
+          - { triple: macos-x86_64,  os: macos-15,      target: x86_64-macos,      flags: "-Dsimd=false" }
+          - { triple: macos-arm64,   os: macos-15,      target: aarch64-macos,     flags: ""              }
 
     steps:
       - name: Checkout

@@ -30,10 +30,16 @@ jobs:
     strategy:
       fail-fast: false        # one OS failing must NOT cancel the other (maximizes signal)
       matrix:
-        # ubuntu-latest = linux-x86_64 (native). macos-latest = macos-arm64 / Apple Silicon
-        # (native, GA since macos-14). Tests run on the HOST arch natively — we do NOT need the
-        # 4-target cross-matrix that release.yml uses; 2 native hosts cover "linux + macos".
-        os: [ubuntu-latest, macos-latest]
+        # ubuntu-latest = linux-x86_64 (native). macos-15 = Apple Silicon (native).
+        # PINNED to macos-15 (NOT macos-latest): macos-latest now resolves to a macOS-26
+        # image whose default Xcode 26.4 SDK trips an upstream Zig 0.15.2 build-runner
+        # link bug (undefined libSystem symbols: _abort/_fork/_dispatch_*/__availability_
+        # version_check) — the build runner fails to link BEFORE any project code compiles.
+        # Per GitHub's one-major-Xcode-per-macOS policy, macos-15 ships ONLY Xcode 16.x
+        # (SDK 15.x), which Zig 0.15.2 links cleanly. See ziglang/zig#31658, #31669 and
+        # ghostty-org/ghostty#11991 (this repo links ghostty-vt). Long-term fix = Zig 0.16;
+        # bump this only after migrating the build off 0.15.2 (macos-15 will deprecate ~1yr).
+        os: [ubuntu-latest, macos-15]
 
     steps:
       - name: Checkout

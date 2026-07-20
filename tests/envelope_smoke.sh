@@ -101,7 +101,16 @@ printf '#!/bin/sh\nexec "%s" -L "%s" "$@"\n' "$REAL_TMUX" "$SOCK" > "$SHIM/tmux"
 chmod +x "$SHIM/tmux"
 "$REAL_TMUX" -L "$SOCK" new-session -d -s test -x 80 -y 10 || fail "isolated tmux new-session"
 "$REAL_TMUX" -L "$SOCK" send-keys -t test "printf '\\033[31mRED\\033[0m pane-content'" Enter
-sleep 0.5
+# Wait until tmux has actually painted the printf OUTPUT before capturing. Replaces a flaky
+# fixed `sleep 0.5`: under CI load the capture could fire before the shell ran printf, so
+# capture-pane saw no color and "--visible: red color span missing" failed. "RED pane-content"
+# (with the space) appears ONLY in the rendered output — the echoed command line has a literal
+# '\033[0m' between RED and pane-content, so it can never match this substring.
+deadline=$(( $(date +%s) + 5 ))
+until "$REAL_TMUX" -L "$SOCK" capture-pane -p -t test | grep -q 'RED pane-content'; do
+  [ "$(date +%s)" -ge "$deadline" ] && fail "tmux never painted 'RED pane-content' output"
+  sleep 0.1
+done
 PANE=$("$REAL_TMUX" -L "$SOCK" list-panes -t test -F '#{pane_id}' | head -1)
 
 # pane --visible
@@ -129,7 +138,17 @@ if pid == 0:
                os.environ.copy())
 else:
     time.sleep(0.8)           # let the TUI paint
-    os.write(fd, b"v")        # start a linewise selection at the cursor
+    # `v` (visual_toggle) RE-ANCHORS a linewise selection at the cursor but leaves it
+    # ZERO-extent (anchor == cursor); the user extends it by MOVING afterward
+    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so
+    # to get a non-empty selection: go to the top (gg), begin (v), then jump to the
+    # bottom (G) -> selects the whole pane, which contains the colored content. Without
+    # a post-`v` motion the selection body is empty and the Issue-1 guard rejects it.
+    os.write(fd, b"gg")       # go to top row
+    time.sleep(0.2)
+    os.write(fd, b"v")        # begin a linewise selection at the top (anchor)
+    time.sleep(0.2)
+    os.write(fd, b"G")        # extend to the bottom row (cursor) -> whole pane
     time.sleep(0.2)
     os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
     deadline = time.time() + 6
