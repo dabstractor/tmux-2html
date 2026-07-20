@@ -112,6 +112,25 @@ const RegionCtx = struct {
     }
 };
 
+// ---- Mouse wiring (PRD §7.6) -------------------------------------------------------------
+// mouseCell (S1) is the pure 1-based-SGR -> 0-based-grid coordinate primitive consumed by
+// applyMouse (S2). The .mouse arm in regionHandle + RegionCtx.mouse_anchor land in P1.M2.T2.S1.
+
+/// PURE: convert a 1-based SGR mouse position (sx, sy) on the popup screen to a 0-based GRID
+/// cell (origin top-left), honoring the viewport `scroll` offset and excluding the status-line
+/// row. gx = sx-1 (screen col 1 = grid col 0); vy = sy-1 clamped to [0, grid_rows-1] (the grid
+/// area — the status line at viewport row `grid_rows` is excluded); gy = scroll + vy clamped to
+/// [0, total_rows-1]. All arithmetic is SATURATING (`-|`, `+|`) and the total_rows==0 / 0-row /
+/// 0-col degenerate cases are guarded, so there is NO u32 underflow.
+/// Validated against view.render's mapping (gy = scroll + vy; CUP to vy+1; col 1 = gx 0).
+/// Consumed by applyMouse (P1.M2.T1.S2); no I/O, no Terminal — fully unit-testable.
+fn mouseCell(sx: u32, sy: u32, scroll: u32, grid_rows: u16, total_rows: u32, tty_cols: u16) view.Pos {
+    const gx: u32 = @min(if (sx >= 1) sx - 1 else 0, (@as(u32, tty_cols) -| 1));
+    const vy: u32 = @min(if (sy >= 1) sy - 1 else 0, (@as(u32, grid_rows) -| 1));
+    const gy: u32 = @min(scroll +| vy, (if (total_rows >= 1) total_rows - 1 else 0));
+    return .{ .x = gx, .y = gy };
+}
+
 // ============================================================================
 // regionHandle - the app.EventHandler callback (decode -> motion/select/search)
 // ============================================================================
@@ -1143,5 +1162,44 @@ test "selfBinDir: returns a non-empty dir (the test binary's dir)" {
     const dir = try selfBinDir(alloc);
     defer alloc.free(dir);
     try testing.expect(dir.len > 0); // the running test binary's directory
+}
+
+test "mouseCell: plain click maps sx-1 / sy-1 (scroll=0)" {
+    const p = mouseCell(5, 3, 0, 10, 50, 80);
+    try std.testing.expectEqual(@as(u32, 4), p.x); // gx = 5-1
+    try std.testing.expectEqual(@as(u32, 2), p.y); // gy = scroll(0) + vy(3-1)
+}
+
+test "mouseCell: click on the status-line row clamps to the last grid row" {
+    // sy=11 > grid_rows=10 => vy clamps to grid_rows-1=9 (status line at viewport row 10 excluded).
+    const p = mouseCell(5, 11, 0, 10, 50, 80);
+    try std.testing.expectEqual(@as(u32, 9), p.y);
+    try std.testing.expectEqual(@as(u32, 4), p.x);
+}
+
+test "mouseCell: viewport scroll offset is applied (gy = scroll + vy)" {
+    const p = mouseCell(5, 3, 20, 10, 50, 80); // vy=2, gy=20+2
+    try std.testing.expectEqual(@as(u32, 22), p.y);
+    try std.testing.expectEqual(@as(u32, 4), p.x);
+}
+
+test "mouseCell: gx clamps to tty_cols-1 for an over-range column" {
+    const p = mouseCell(200, 1, 0, 10, 50, 80); // sx-1=199 clamps to 80-1
+    try std.testing.expectEqual(@as(u32, 79), p.x);
+}
+
+test "mouseCell: gy clamps to total_rows-1 for an over-scroll position" {
+    // vy at max grid row (9), no scroll => gy = 9 (well within total_rows=50).
+    try std.testing.expectEqual(@as(u32, 9), mouseCell(1, 50, 0, 10, 50, 80).y);
+    // scroll=100 past total_rows=50 => gy = min(100+0, 49) = 49.
+    try std.testing.expectEqual(@as(u32, 49), mouseCell(1, 1, 100, 10, 50, 80).y);
+}
+
+test "mouseCell: degenerate grid_rows==0 / tty_cols==0 / total_rows==0 do NOT underflow" {
+    const a = mouseCell(5, 3, 0, 0, 50, 0); // grid_rows=0 AND tty_cols=0
+    try std.testing.expectEqual(@as(u32, 0), a.x); // min(4, 0-|0=0)
+    try std.testing.expectEqual(@as(u32, 0), a.y); // vy=min(2, 0)=0; gy=min(0, 49)=0
+    const b = mouseCell(5, 3, 0, 10, 0, 80); // total_rows=0
+    try std.testing.expectEqual(@as(u32, 0), b.y); // gy = min(scroll+vy, 0) = 0
 }
 
