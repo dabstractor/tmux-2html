@@ -138,7 +138,7 @@ if [ "$have_py" -eq 0 ]; then
 else
     ROF=$W/region.html; rm -f "$ROF"
     PATH="$SHIM:$PATH" python3 - "$PANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
-import os, pty, select, sys, time, signal
+import os, pty, select, sys, time, signal, struct, fcntl, termios
 pane, out = sys.argv[1], sys.argv[2]
 pid, fd = pty.fork()
 if pid == 0:
@@ -146,40 +146,33 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    # DRAIN while waiting — never bare time.sleep. region paints a full screen on every
-    # event; sleeping without reading lets the pty's ~64KB output buffer fill so the TUI
-    # BLOCKS on its paint write, never reads our keystrokes, confirm never fires, and a
-    # blocking os.waitpid then hangs the CI job for hours (the deadlock that hung runs
-    # 29755955109 / 29762462640 / 29764587186). Draining keeps the buffer empty so each
-    # paint completes and input is processed. (Local runs have a smaller/faster paint and
-    # never deadlocked — CI did.)
-    def drain(secs):
-        end = time.time() + secs
-        while time.time() < end:
-            r, _, _ = select.select([fd], [], [], 0.05)
-            if not r:
-                continue
-            try:
-                data = os.read(fd, 8192)
-            except OSError:
-                break
-            if not data:
-                break
-    drain(0.8)                # let the TUI paint (buffer kept empty)
-    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; the user extends it
-    # by MOVING (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig),
-    # so go to the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty
-    # selection (contains the colored content). Without the post-`v` motion the Issue-1
-    # empty-selection guard rejects it.
+    # pty.fork() leaves the pty window size at 0x0. region's TUI still paints (default size)
+    # but its input loop then NEVER services keys — the TUI sits idle and a blocking
+    # waitpid hangs the job for hours. That is what hung CI runs 29755955109 / 29762462640 /
+    # 29764587186 (a non-interactive CI parent yields 0x0). Set a real size + raise SIGWINCH
+    # so the event loop starts reading input. Verified: without this region ignores even `q`.
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    os.kill(pid, signal.SIGWINCH)
+    time.sleep(0.8)           # let the TUI paint
+    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
+    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go
+    # to the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty selection
+    # (contains the colored content). Without the post-`v` motion the Issue-1 empty guard
+    # rejects it.
     for key in (b"gg", b"v", b"G", b"\r"):
         os.write(fd, key)
-        drain(0.2)
+        time.sleep(0.2)
     # BOUNDED wait + SIGKILL: even if region never exits for any reason, FAIL in ~10s
     # instead of hanging the job for 6h. Replaces the old blocking os.waitpid(pid, 0).
     deadline = time.time() + 10
     exited = False
     while time.time() < deadline:
-        drain(0.1)
+        r, _, _ = select.select([fd], [], [], 0.1)
+        if r:
+            try:
+                os.read(fd, 4096)
+            except OSError:
+                break
         wpid, _ = os.waitpid(pid, os.WNOHANG)
         if wpid != 0:
             exited = True

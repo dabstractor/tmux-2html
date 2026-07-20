@@ -71,7 +71,7 @@ rm -f "$OUT" "$SIDECAR"            # start clean (SIDECAR may linger from envelo
 # Asserts the FIXED behavior: exit 1, NO output file. (Without the S2 fix this writes an
 # empty file and exits 0 — the bug; the python sys.exit(non-zero) below makes `|| fail` fire.)
 PATH="$SHIM:$PATH" python3 - "$PANE" "$OUT" "$BIN" <<'PYEOF' || fail "region empty-confirm pty drive"
-import os, pty, select, sys, time, signal
+import os, pty, select, sys, time, signal, struct, fcntl, termios
 pane, out, binary = sys.argv[1], sys.argv[2], sys.argv[3]
 pid, fd = pty.fork()
 if pid == 0:
@@ -79,33 +79,27 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    # DRAIN while waiting (not bare sleep) so the pty output buffer never fills and
-    # deadlocks the TUI's paint writes — same fix as tests/envelope_smoke.sh's region
-    # drive (which hung CI runs for hours via this exact pattern). Draining keeps the
-    # buffer empty so the TUI completes each paint and reads our keystrokes.
-    def drain(secs):
-        end = time.time() + secs
-        while time.time() < end:
-            r, _, _ = select.select([fd], [], [], 0.05)
-            if not r:
-                continue
-            try:
-                data = os.read(fd, 8192)
-            except OSError:
-                break
-            if not data:
-                break
-    drain(0.8)                # let the TUI paint (buffer kept empty)
+    # pty.fork() leaves the pty window size at 0x0; region's TUI then paints but its input
+    # loop never services keys and a blocking waitpid hangs the job for hours (the CI hang).
+    # Set a real size + SIGWINCH so the event loop reads input. Same fix as envelope_smoke.sh.
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+    os.kill(pid, signal.SIGWINCH)
+    time.sleep(0.8)           # let the TUI paint
     os.write(fd, b"v")        # begin a linewise selection on the (blank) cursor row
-    drain(0.2)
+    time.sleep(0.2)
     os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
-    # BOUNDED wait + SIGKILL: never hang the job (mirrors envelope_smoke.sh). Capture the
-    # exit status via WNOHANG so we can still assert the Issue-1 exit code below.
+    # BOUNDED wait + SIGKILL: never hang the job. Capture the exit status via WNOHANG so we
+    # can still assert the Issue-1 exit code below.
     deadline = time.time() + 10
     status = 0
     exited = False
     while time.time() < deadline:
-        drain(0.1)
+        r, _, _ = select.select([fd], [], [], 0.1)
+        if r:
+            try:
+                os.read(fd, 4096)
+            except OSError:
+                break
         wpid, st = os.waitpid(pid, os.WNOHANG)
         if wpid != 0:
             status, exited = st, True
