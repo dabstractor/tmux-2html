@@ -323,6 +323,15 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
     //     defaults it to 10_000 (~10 KiB) — which prunes almost all scrollback (only ~160 rows
     //     survive on a 319-col pane). Size it to the captured content via render.scrollbackBytes
     //     so the whole scrollback is retained. See render.scrollbackBytes for the derivation.
+    // (Issue 2 defensive guard) region builds its Terminal DIRECTLY (not via renderGrid), so
+    // render.zig's cols/rows guards (S1/S2) don't cover it. cap.cols/rows come from capture
+    // (always >=1 for a real pane), but a degenerate/resized pane geometry could yield 0 — and
+    // Terminal.init on a zero-dimension terminal segfaults (main.zig:504 rationale). Exit 2
+    // (capture error, PRD §5) before reaching Terminal.init. Mirrors the pane guard.
+    if (cap.cols < 1 or cap.rows < 1) {
+        try stderr.writeAll("tmux-2html region: capture has zero-dimension pane geometry\n");
+        return 2; // capture/target error (PRD §5)
+    }
     var t = try Terminal.init(allocator, .{ .cols = cap.cols, .rows = cap.rows, .max_scrollback = render.scrollbackBytes(cap.ansi, cap.cols) });
     defer t.deinit(allocator);
     var stream = t.vtStream();
