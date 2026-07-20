@@ -4,14 +4,14 @@
       "type": "Phase",
       "id": "P1",
       "title": "§7.1 Status-Line Hint Sync (copy-mode parity display fix)",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Close the sole remaining gap from the copy-mode-parity delta: the TUI status line (renderStatus) still advertises the old conditional <S-sel> token. Update it to the always-shown static segment 'v=sel C-v=block o=swap' mandated by PRD §7.1, so the on-screen hints match the actual keybindings shipped in §7.4. This is a display-only change — it touches no tmux server, no shell-out, no IPC. All other delta items (§0.1 safety tooling, §7.4 selection logic, §17 decisions log) are already implemented and tested.",
       "milestones": [
         {
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Sync the TUI status line to the copy-mode-parity keybindings",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Update renderStatus() in src/tui/view.zig to emit the PRD §7.1 status-line format exactly: replace the conditional <S-sel> token (line 247) with a static 'v=sel C-v=block o=swap' segment. Update the four renderStatus unit tests, the stale comment in select.zig:45, and docs/CONFIGURATION.md to match. Verify the build and full test suite pass in ReleaseFast mode.",
           "tasks": [
             {
@@ -42,14 +42,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Sync changeset-level documentation",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Sweep README.md and any other changeset-level overview docs to ensure they are consistent with the status-line hint change. The delta PRD §4 declares Mode B 'not applicable' because README.md:102 ('The in-app status line lists every key') is generic, but this task exists as the mandatory final safety net per the orchestrator's §5 rule to verify no overview doc is stale.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Verify README.md and overview docs are consistent with the new status-line hint; update if stale",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
