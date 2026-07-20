@@ -438,10 +438,12 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
         .confirm => confirm_render: {
             app.exit(state); // restore FIRST (cooked-mode warns; idempotent with the defer above)
 
-            // PRD 7.5: empty selection => warn, no file, exit 1. "Empty" == no selection begun
-            // (sel inactive). The TUI lets Enter/y through regardless (the handler returns
-            // .confirm unconditionally); THIS arm is where the empty guard lives. (`stderr` is
-            // body()'s already-declared stderr writer.)
+            // PRD §13 / §7.5: empty selection on confirm => warn, no file, exit 1. This is the
+            // FIRST of TWO guards (TWO-TIER): tier 1 (here) = no selection begun at all
+            // (sel inactive) — the user hit Enter without pressing v. TIER 2 (after the render,
+            // below) catches an ACTIVE selection whose rendered body is blank cells. The TUI
+            // handler returns .confirm unconditionally, so both guards live in THIS arm.
+            // (`stderr` is body()'s already-declared stderr writer.)
             if (!ctx.sel.active()) {
                 stderr.writeAll("tmux-2html region: no selection (press v to begin, then Enter)\n") catch {};
                 break :confirm_render 1;
@@ -473,6 +475,17 @@ pub fn body(allocator: std.mem.Allocator, opts: cli.RegionOpts) anyerror!u8 {
                 break :confirm_render 1;
             };
             defer allocator.free(html);
+
+            // PRD §13 / Issue 1 — TIER 2 guard. An ACTIVE selection over blank cells (a blank
+            // prompt line, trailing blank row, or empty rectangle) renders a zero-non-blank-cell
+            // body even though tier 1 (sel.active()) passed. selectionBodyEmpty scans the <pre>
+            // body of the full §8.1 document (the envelope has exactly one <pre>); warn + exit 1
+            // BEFORE resolveOutputPath/writeHtmlAtomic/writeLastOutput so neither the HTML file
+            // nor the .last-output sidecar is produced. Mirrors render.zig:788 (render --selection).
+            if (render.selectionBodyEmpty(html)) {
+                stderr.writeAll("tmux-2html region: selection is empty\n") catch {};
+                break :confirm_render 1;
+            }
 
             // Output path: explicit --output wins; else <session>-<unixtime>-<pid>.html in the
             // configured output dir (mirrors pane's panePrepare via the SHIPPED capture.* helpers).
