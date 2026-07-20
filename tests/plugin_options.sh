@@ -94,7 +94,7 @@ done
 # INNER popup command that display-popup re-runs at fire time.
 rline=$(printf '%s' "$CAPTURE" | grep -F 'region' | head -1)
 [ -n "$rline" ] || fail "c: no region binding captured"
-rinner=$(printf '%s' "$rline" | sed 's/.*display-popup -E -w 100% -h 100% "//; s/"; if.*//')
+rinner=$(printf '%s' "$rline" | sed 's/.*display-popup [^"]*"//; s/"; if.*//')
 /bin/sh -n -c "$rinner" 2>/dev/null || fail "c: region inner popup command fails /bin/sh -n"
 #
 # (c2) Apostrophe in @tmux-2html-lang (defense-in-depth; BCP-47-normalized in

@@ -38,7 +38,7 @@ For installation and a feature overview, see the `README.md`.
 | Option | Default | Meaning |
 |---|---|---|
 | `@tmux-2html-full-key` | `O` | Prefix key: capture the full pane (scrollback + visible). |
-| `@tmux-2html-region-key` | `C-o` | Prefix key: open the full-screen region overlay (TUI). |
+| `@tmux-2html-region-key` | `C-o` | Prefix key: open the region overlay (TUI) — a pane-anchored popup sized to the current pane (§7.0). |
 | `@tmux-2html-visible-key` | *(empty)* | Prefix key: capture the visible pane only. Unbound by default. |
 | `@tmux-2html-output-dir` | `${XDG_DATA_HOME:-~/.local/share}/tmux-2html` | Directory where rendered HTML files are written. |
 | `@tmux-2html-open` | `on` | If `on`, run `xdg-open` on the HTML file after writing it. |
@@ -95,7 +95,8 @@ back to `en`.)
 ## The region overlay
 
 `prefix C-o` (the `@tmux-2html-region-key`) opens the region overlay: a
-full-screen `tmux display-popup` running `tmux-2html region`. The overlay first
+pane-anchored, borderless `tmux display-popup` sized to exactly overlay the
+source pane (`#{pane_width}`×`#{pane_height}`; §7.0), running `tmux-2html region`. The overlay first
 captures the pane's **full scrollback** (honoring `@tmux-2html-history-limit`),
 so you browse all history, not just the visible rows. The cursor starts on the
 **last** row, like tmux copy-mode.

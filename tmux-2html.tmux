@@ -187,9 +187,11 @@ fi
 # ------------------------------------------------------------------
 # C-o region binding — P2.M2.T2.S2 (display-popup wrapper + .last-output sidecar)
 # ------------------------------------------------------------------
-# PRD §9.3 + §7.5: prefix <region_key> (default C-o) opens a full-screen tmux
-# display-popup (a REAL pty — run-shell has no /dev/tty, so the region TUI + the
-# palette can only run inside the popup) running `tmux-2html region --target
+# PRD §9.3 + §7.0: prefix <region_key> (default C-o) opens a pane-anchored,
+# borderless tmux display-popup (-B; sized #{pane_width}x#{pane_height}; anchored
+# over the pane top-left via -x P -y P) so the TUI's pty dims exactly match the
+# captured grid (1:1 fidelity). It is a REAL pty (run-shell has no /dev/tty, so the
+# region TUI + palette can only run inside it) running `tmux-2html region --target
 # #{pane_id}`. region resolves font/open/output-dir itself via show-option (do
 # NOT pass them — mirrors pane). The popup has NO tmux message channel, so on
 # confirm region writes the bare result path to $TMUX_2HTML_BIN/.last-output;
@@ -211,7 +213,7 @@ fi
 # inside display-message's double-quoted arg. The trailing if…fi returns 0
 # (cancel is silent).
 [ "$binary_ready" = 1 ] && tmux bind-key "$region_key" run-shell \
-    "last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\$last\"; tmux display-popup -E -w 100% -h 100% \"$TMUX_2HTML_BIN/tmux-2html region $title_arg $lang_arg --target '#{pane_id}'\"; if [ -f \"\$last\" ]; then out=\$(cat \"\$last\"); tmux display-message \"tmux-2html: wrote \$out\"; fi"
+    "last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\$last\"; tmux display-popup -B -E -w '#{pane_width}' -h '#{pane_height}' -x P -y P -t '#{pane_id}' \"$TMUX_2HTML_BIN/tmux-2html region $title_arg $lang_arg --target '#{pane_id}'\"; if [ -f \"\$last\" ]; then out=\$(cat \"\$last\"); tmux display-message \"tmux-2html: wrote \$out\"; fi"
 
 # Optional test seam (APPEND with >>; §4 already wrote with > and runs first
 # in file order). Records the region binding decision for deterministic tests.
