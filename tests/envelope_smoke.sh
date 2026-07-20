@@ -168,15 +168,20 @@ else:
         time.sleep(0.2)
     # BOUNDED wait + SIGKILL: even if region never exits for any reason, FAIL in ~10s
     # instead of hanging the job for 6h. Replaces the old blocking os.waitpid(pid, 0).
+    # Captures region's TUI output so a timeout prints its last status line on the CI log
+    # (diagnoses whether region received the keystrokes vs ignored input entirely).
     deadline = time.time() + 10
     exited = False
+    tui = bytearray()
     while time.time() < deadline:
         r, _, _ = select.select([fd], [], [], 0.1)
         if r:
             try:
-                os.read(fd, 4096)
+                chunk = os.read(fd, 4096)
             except OSError:
                 break
+            if chunk:
+                tui.extend(chunk)
         wpid, _ = os.waitpid(pid, os.WNOHANG)
         if wpid != 0:
             exited = True
@@ -184,7 +189,12 @@ else:
     if not exited:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-        sys.exit("region: timed out (did not exit after gg/v/G/Enter)")
+        dec = bytes(tui).decode("utf-8", "replace")
+        dec = "".join(c for c in dec if c >= " " or c in "\n\r\t")
+        lines = [ln.strip() for ln in dec.replace("\r", "\n").split("\n") if ln.strip()]
+        tail = (lines[-1][:200] if lines else "(no TUI output)")
+        sys.exit("region: timed out after gg/v/G/Enter. file=" + str(os.path.exists(out))
+                 + " tui_bytes=" + str(len(tui)) + " last_status=" + repr(tail))
     if not os.path.exists(out):
         sys.exit("region: no output file written (confirm did not fire)")
 PYEOF
