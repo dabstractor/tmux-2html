@@ -101,9 +101,12 @@ selection UI, and ANSI→HTML rendering (reusing the Ghostty VT engine).
 - Three capture modes, all color-preserving:
   1. **Full pane** — entire scrollback + visible content.
   2. **Visible pane** — only the currently visible rows.
-  3. **Region** — an interactive, full-screen, copy-mode-style UI over the full
-     scrollback; user selects a **line range or a rectangle/block** and renders
-     exactly that.
+  3. **Region** — an interactive, copy-mode-style UI rendered at the **pane's
+     own size** over the full scrollback; user selects a **line range or a
+     rectangle/block** and renders exactly that. The overlay is sized and
+     positioned to exactly match the source pane (§7), never a forced
+     fullscreen view — the user controls the rendered width by sizing the pane
+     first.
 - Output to stdout, a file, and/or auto-open in a browser.
 - Real terminal palette fidelity (term2html-equivalent), via a cached palette so
   it works inside tmux bindings where no controlling terminal exists.
@@ -149,6 +152,20 @@ These are established facts, verified during research, that constrain the design
    an OSC palette query returns tmux's palette (what the user's theme/tmux
    configures), not the outer terminal emulator's. The palette to capture is a
    user choice; default is the tmux-presented palette.
+7. **An external TUI cannot truly take over a pane; a pane-anchored
+   `display-popup` is the faithful host.** tmux copy mode is compiled into the
+   server (`window-copy.c`, `mode-tree.c`) and renders into the pane's
+   server-owned grid — there is **no** plugin or external API to register a
+   new pane/client mode. The pane's pty slave is owned by the program running
+   in it, and the only takeover primitives (`respawn-pane`, `kill-pane`)
+   destroy that program (forbidden by §0); `pipe-pane` is output-only (no
+   input, no terminal surface). Therefore the region TUI runs in a
+   `display-popup` **sized and positioned to exactly overlay the source pane**
+   — same width/height, same left/top — so content renders 1:1 at the
+   size/position the user sees, and when the popup closes the original pane
+   (and its program) is untouched beneath. Requires `tmux ≥ 3.3` (`-B`
+   borderless popup + pane-anchored `-x`/`-y`); see §7 for the verified
+   invocation.
 
 ## 3. Architecture
 
@@ -165,7 +182,7 @@ These are established facts, verified during research, that constrain the design
 │  capture.zig   ─ tmux capture-pane -e (shells out via $TMUX)           │
 │  palette.zig   ─ OSC query + XDG cache (absorbed from term2html)       │
 │  render.zig    ─ ghostty-vt grid → HTML (absorbed term2html formatter) │
-│  tui/          ─ full-screen copy-mode overlay (select line/block)     │
+│  tui/          ─ pane-anchored copy-mode overlay (select line/block)   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -194,7 +211,7 @@ tmux-2html/
 │   ├── render.zig               # ANSI → HTML (adapted term2html main/format)
 │   └── tui/
 │       ├── app.zig              # event loop, raw termios, alt-screen
-│       ├── view.zig              # full-screen VT rendering + status line
+│       ├── view.zig              # full-repaint VT rendering + status line
 │       ├── select.zig           # selection model (linewise/rectangle)
 │       └── input.zig            # key decoding (vim + arrows + search)
 ├── tmux-2html.tmux              # TPM entrypoint (sourced by TPM)
@@ -246,8 +263,9 @@ renderer with explicit cols/rows.
 --open
 ```
 Behavior: capture full scrollback (`-S - -E -`, honoring `--history` cap) into
-a grid; launch the **full-screen TUI** (§7); on confirm, render the current
-selection (line or block) and emit HTML; on cancel, exit with no output.
+a grid; launch the **region TUI in a popup sized to the pane** (§7); on
+confirm, render the current selection (line or block) and emit HTML; on
+cancel, exit with no output.
 
 ### 5.4 `tmux-2html sync-palette` — query + cache the palette
 ```
@@ -291,8 +309,51 @@ bg 41 44 51
 
 ## 7. The copy-mode TUI (`tmux-2html region`)
 
-Feels exactly like tmux copy-mode: a **full-screen overlay** taking over the
-client via `tmux display-popup -E -w 100% -h 100%` running the binary.
+Feels exactly like tmux copy-mode: an overlay **the exact size and position of
+the source pane**, not a forced fullscreen view. The TUI runs in a
+`display-popup` sized to the pane's width/height and anchored over the pane's
+top-left, so the captured content renders 1:1 at the size the user sees.
+
+### 7.0 Host: a pane-anchored popup, and why not the pane itself
+An external TUI **cannot** run inside the pane the way built-in copy mode
+does. tmux copy/choose/view modes are compiled into the server and render into
+the pane's server-owned grid; there is no plugin or external API to register a
+new pane/client mode. The pane's pty is owned by the program running in it, and
+the only takeover primitives (`respawn-pane`, `kill-pane`) destroy that program
+— forbidden by §0. `pipe-pane` is output-only. So the faithful,
+non-destructive host is a `display-popup` **sized and positioned to exactly
+overlay the pane**; when it closes, the original pane and its program are
+untouched beneath.
+
+Verified invocation (flags confirmed against tmux `cmd-display-menu.c` /
+`popup.c`, present since **tmux 3.3**):
+
+```sh
+tmux display-popup -B -E \
+  -w "#{pane_width}" -h "#{pane_height}" \
+  -x P -y P \
+  -t "#{pane_id}" \
+  "$TMUX_2HTML_BIN/tmux-2html region --target #{pane_id} …"
+```
+
+- `-w #{pane_width}` / `-h #{pane_height}` — total popup footprint = the pane's
+  dimensions (formats; the result is the outer size `pd->sx`/`pd->sy`).
+- `-B` — **borderless** (`BOX_LINES_NONE`). With a border the inner pty would
+  be footprint-minus-2 (one cell per side lost to the border); borderless makes
+  the inner pty the **full** `pane_width × pane_height`. No chrome also matches
+  copy mode, which has no border.
+- `-x P` / `-y P` — the built-in "anchor to the target pane" position tokens
+  (`-x P` → `popup_pane_left` = the pane's left column; `-y P` →
+  `popup_pane_bottom`, and `-y` is resolved as the bottom edge then
+  `top = bottom − height`, so with `height = pane_height` the popup's top row
+  is the pane's top row).
+- `-t "#{pane_id}"` — the pane the position tokens are computed against; must
+  be the pane being overlaid.
+
+Net effect: the TUI receives a pty of exactly `pane_width × pane_height` at the
+pane's exact screen location. The user controls the rendered width/height by
+sizing the pane first (zoom it with `resize-pane -Z` for a fullscreen render);
+tmux-2html never imposes a wider view than the pane.
 
 ### 7.1 Display
 - Enter alternate screen (`\e[?1049h`), hide cursor, raw termios (no echo, no
@@ -461,8 +522,9 @@ Sourced by TPM at load. Responsibilities:
 
 ### 9.3 Bindings (prefix table)
 - `O`   → `run-shell "$TMUX_2HTML_BIN/tmux-2html pane --full --target #{pane_id} …"`
-- `C-o` → `run-shell` a wrapper that launches the full-screen popup:
-  `tmux display-popup -E -w 100% -h 100% "$TMUX_2HTML_BIN/tmux-2html region --target #{pane_id} …"`
+- `C-o` → `run-shell` a wrapper that launches the **pane-anchored** popup
+  (§7.0), sized to the current pane:
+  `tmux display-popup -B -E -w "#{pane_width}" -h "#{pane_height}" -x P -y P -t "#{pane_id}" "$TMUX_2HTML_BIN/tmux-2html region --target #{pane_id} …"`
 - *(visible key, if set)* → `… pane --visible …`
 
 Bindings pass `--target #{pane_id}`, read output-dir/open/font from options,
@@ -503,7 +565,8 @@ Platform triples: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`,
 - Zig 0.15.2 (build-time only for path 2; runtime users need not install it).
 - ghostty (VT) — MIT, © Mitchell Hashimoto / Ghostty contributors.
 - term2html logic (absorbed) — MIT, © 2026 aarol.
-- Runtime: `tmux ≥ 3.2` (`display-popup`), `xdg-open` (optional, for `--open`).
+- Runtime: `tmux ≥ 3.3` (`display-popup` with `-B` borderless + pane-anchored
+  `-x`/`-y`, per §7.0), `xdg-open` (optional, for `--open`).
 - No Python, no Node, no external `term2html` binary at runtime.
 
 ## 13. Edge cases & limits
@@ -573,5 +636,9 @@ Platform triples: `linux-x86_64`, `linux-aarch64`, `macos-x86_64`,
   precedence cached → live → default.
 - **Bindings:** `O` full pane, `C-o` region (overrides existing debug bind),
   visible-pane provided but unbound.
-- **TUI host:** full-screen `tmux display-popup` (100%×100%), copy-mode feel.
+- **TUI host:** pane-anchored `tmux display-popup` — sized to the pane
+  (`#{pane_width}×#{pane_height}`, `-x P -y P`, borderless `-B`), copy-mode
+  feel. True pane takeover is impossible for an external program (copy mode is
+  server-internal; no takeover API); the pane-overlay popup is the faithful,
+  non-destructive host (§7.0). Requires tmux ≥ 3.3.
 - **Coordinates:** owned (no tmux copy-mode formats).
