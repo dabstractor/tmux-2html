@@ -1,0 +1,39 @@
+h1.0 tmux-2html — Product Requirements & Technical Specification
+ h2.0 0. ⚠️ CRITICAL SAFETY RULE — READ BEFORE IMPLEMENTING OR TESTING
+  h3.0 0.1 Operational & system-safety rules
+ h2.1 1. Overview
+  h3.1 1.1 Goals
+  h3.2 1.2 Non-goals (v1)
+ h2.2 2. Background & key technical findings
+ h2.3 3. Architecture
+ h2.4 4. Repository layout
+ h2.5 5. The binary — CLI surface
+  h3.3 5.1 tmux-2html render — core renderer (stdin → complete HTML5 document)
+  h3.4 5.2 tmux-2html pane — capture a pane → HTML
+  h3.5 5.3 tmux-2html region — interactive copy-mode overlay → HTML
+  h3.6 5.4 tmux-2html sync-palette — query + cache the palette
+  h3.7 5.5 tmux-2html --version / --help
+ h2.6 6. Palette subsystem
+ h2.7 7. The copy-mode TUI (tmux-2html region)
+  h3.8 7.1 Display
+  h3.9 7.2 Movement (vim + arrows)
+  h3.10 7.3 Search
+  h3.11 7.4 Selection — tmux copy-mode parity
+  h3.12 7.5 Confirm / cancel
+  h3.13 7.6 Mouse (supported)
+ h2.8 8. Rendering engine (render.zig)
+  h3.14 8.1 HTML document envelope (normative — "no cutting corners")
+ h2.9 9. tmux plugin
+  h3.15 9.1 Entrypoint tmux-2html.tmux
+  h3.16 9.2 Options (tmux user options, @tmux-2html-*)
+  h3.17 9.3 Bindings (prefix table)
+ h2.10 10. Binary acquisition (scripts/ensure_binary.sh)
+ h2.11 11. Build & release
+ h2.12 12. Dependencies & pinned versions
+ h2.13 13. Edge cases & limits
+ h2.14 14. Licensing & attribution
+ h2.15 15. Testing strategy
+ h2.16 16. Roadmap (out of v1 scope)
+ h2.17 17. Decisions log
+---
+code:9 para:37 list:24 table:1 quote:2
