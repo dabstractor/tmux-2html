@@ -42,7 +42,7 @@ pub const Sel = struct {
     mode: Mode = .none,
 
     /// True when a selection is active (mode != .none). Drives the Esc clear-vs-quit decision
-    /// in region.zig + the status line's `<S-sel>` token + `view.Status.has_selection`.
+    /// in region.zig + `view.Status.has_selection` (retained for future use).
     pub fn active(self: Sel) bool {
         return self.mode != .none;
     }

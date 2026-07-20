@@ -111,7 +111,7 @@ even before starting a selection — and a status line on the bottom row. The st
 line has the exact format:
 
 ```
-[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>  Enter=render q=quit
+[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  v=sel C-v=block o=swap  Enter=render q=quit
 ```
 
 - `[LINE]` or `[BLOCK]` — the selection mode tag. **Omitted entirely when nothing
@@ -119,11 +119,13 @@ line has the exact format:
 - `row:N col:M` — the 1-based cursor position.
 - `/pattern  N match(es)` — shown only when a search pattern is active; `N` is
   the number of matches.
-- `<S-sel>` — shown only when a selection is active.
+- `v=sel C-v=block o=swap` — always shown; press `v` to start/re-anchor a
+  linewise selection, `Ctrl-v` to toggle visual block mode, `o` to swap the
+  cursor to the other end of the selection (see Selection below).
 - `Enter=render q=quit` — always shown.
 
-For example, with nothing active the status line is just
-`row:1 col:1  Enter=render q=quit`.
+For example, with nothing active the status line is
+`row:1 col:1  v=sel C-v=block o=swap  Enter=render q=quit`.
 
 ### Movement
 

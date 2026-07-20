@@ -213,7 +213,7 @@ pub fn render(
 // ---- S2 status line entry point (PRD §7.1 — paints the LAST tty row) -----------
 
 /// Paint the LAST tty row (`tty_rows`, 1-based) with the PRD §7.1 copy-mode status line:
-///   `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  <S-sel>Enter=render q=quit`
+///   `[LINE|BLOCK]  row:N col:M  /pattern  N match(es)  v=sel C-v=block o=swap  Enter=render q=quit`
 /// in reverse+bold (vim `StatusLine` default = reverse; convention confirmed). `cols` is the
 /// tty width (a long pattern is truncated so the line fits; no wrap). `tty_rows` is the row
 /// to paint (1-based) — the caller passes the LAST screen row; S1's render() paints rows
@@ -243,9 +243,8 @@ pub fn renderStatus(out: *std.Io.Writer, tty_rows: u16, cols: u16, status: Statu
     if (status.pattern) |p| if (p.len > 0) {
         try w.print("  /{s}  {d} match(es)", .{ p, status.matches.len });
     };
-    // <S-sel> (only when a selection is active)
-    if (status.has_selection) try w.writeAll("  <S-sel>");
-    // static key hints (always shown)
+    // static key hints (always shown; v/Ctrl-v/o mirror §7.4 selection keys)
+    try w.writeAll("  v=sel C-v=block o=swap");
     try w.writeAll("  Enter=render q=quit");
 
     var line = fw.buffered();
@@ -713,7 +712,7 @@ fn statusOwned(alloc: std.mem.Allocator, tty_rows: u16, cols: u16, status: Statu
 test "renderStatus: [LINE] full line — exact field order, reverse SGR, EL tail" {
     const alloc = std.testing.allocator;
     const matches = [_]Match{ .{ .y = 0, .x1 = 0, .x2 = 1 }, .{ .y = 1, .x1 = 0, .x2 = 1 }, .{ .y = 2, .x1 = 0, .x2 = 1 } };
-    const out = try statusOwned(alloc, 24, 80, .{
+    const out = try statusOwned(alloc, 24, 100, .{
         .mode = .line,
         .cursor = .{ .x = 3, .y = 2 },
         .pattern = "foo",
@@ -728,8 +727,9 @@ test "renderStatus: [LINE] full line — exact field order, reverse SGR, EL tail
     try std.testing.expect(std.mem.indexOf(u8, out, "row:3 col:4") != null);
     // /pattern  N match(es) (N = matches.len = 3).
     try std.testing.expect(std.mem.indexOf(u8, out, "/foo  3 match(es)") != null);
-    // <S-sel> shown (has_selection).
-    try std.testing.expect(std.mem.indexOf(u8, out, "<S-sel>") != null);
+    // v=sel C-v=block o=swap is now the always-shown hint (no <S-sel> token).
+    try std.testing.expect(std.mem.indexOf(u8, out, "v=sel C-v=block o=swap") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<S-sel>") == null);
     // static hints.
     try std.testing.expect(std.mem.indexOf(u8, out, "Enter=render q=quit") != null);
     // trailing EL + reset.
@@ -749,8 +749,9 @@ test "renderStatus: [BLOCK] mode + field order" {
     try std.testing.expect(std.mem.indexOf(u8, out, "[BLOCK]") != null);
     // 1-based: cursor (0,0) ⇒ row:1 col:1.
     try std.testing.expect(std.mem.indexOf(u8, out, "row:1 col:1") != null);
-    // empty pattern ⇒ no search token; no selection ⇒ no <S-sel>.
+    // empty pattern ⇒ no search token; the v/Ctrl-v/o hint is always shown (no <S-sel>).
     try std.testing.expect(std.mem.indexOf(u8, out, "match(es)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "v=sel C-v=block o=swap") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "<S-sel>") == null);
     try std.testing.expect(std.mem.endsWith(u8, out, "\x1b[K\x1b[0m"));
 }
@@ -774,6 +775,8 @@ test "renderStatus: mode=.none omits the bracket; no pattern omits /pat" {
     try std.testing.expect(std.mem.indexOf(u8, out, "match(es)") == null);
     // static hints still present.
     try std.testing.expect(std.mem.indexOf(u8, out, "Enter=render q=quit") != null);
+    // the v/Ctrl-v/o hint is shown even in .none mode (always-on).
+    try std.testing.expect(std.mem.indexOf(u8, out, "v=sel C-v=block o=swap") != null);
 }
 
 test "renderStatus: truncates the line to cols (no wrap)" {
