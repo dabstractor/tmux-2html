@@ -121,7 +121,8 @@ Capture the active pane's full scrollback:
 tmux-2html pane --full
 ```
 
-Render piped ANSI to a file:
+Render piped ANSI to a file (in a headless/CI context with no
+controlling terminal, add `--cols N`):
 
 ```sh
 tmux-2html render < ansi.txt > out.html

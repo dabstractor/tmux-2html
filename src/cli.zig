@@ -315,7 +315,7 @@ const render_help =
     \\  --selection X1,Y1,X2,Y2[,rect]   render only a sub-grid (rect=1 -> block)
     \\  --help              show this help
     \\
-    \\Exit codes: 0 success, 1 usage/runtime error.
+    \\Exit codes: 0 success, 1 usage/runtime error, 2 size/terminal error.
     \\
 ;
 

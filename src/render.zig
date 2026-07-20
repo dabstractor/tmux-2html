@@ -715,7 +715,7 @@ pub fn spawnXdgOpen(path: []const u8, alloc: std.mem.Allocator) void {
 fn reportSizeError(err: SizeError) void {
     const stderr = std.fs.File.stderr();
     const msg: []const u8 = switch (err) {
-        error.SizeRequired => "tmux-2html render: --cols is required when input is not a tty\n",
+        error.SizeRequired => "tmux-2html render: --cols is required when no controlling terminal is available\n",
         error.NoTty, error.IoctlFailed, error.InvalidWindowSize => "tmux-2html render: cannot determine terminal size\n",
         error.UnsupportedPlatform => "tmux-2html render: terminal size detection unsupported on this platform\n",
     };
