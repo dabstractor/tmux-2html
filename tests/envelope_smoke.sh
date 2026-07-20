@@ -137,7 +137,15 @@ if [ "$have_py" -eq 0 ]; then
     echo "  region: SKIP (python3 absent — render --selection covers the same render path)"
 else
     ROF=$W/region.html; rm -f "$ROF"
-    PATH="$SHIM:$PATH" python3 - "$PANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
+    # Dedicated 25x6 pane for the region drive — mirrors tests/region_signal_keys.sh's PROVEN
+    # CI setup (region services input reliably on a normal-sized pane). On the 80x10 RED pane
+    # above, region painted the initial screen but never read input on CI (cursor never moved,
+    # the drive timed out). L1-L5 gives the selection non-empty content to render.
+    "$REAL_TMUX" -L "$SOCK" new-session -d -s reg -x 25 -y 6 || fail "isolated tmux new-session (reg)"
+    "$REAL_TMUX" -L "$SOCK" send-keys -t reg "printf 'L1\nL2\nL3\nL4\nL5\n'" Enter
+    sleep 0.5
+    RPANE=$("$REAL_TMUX" -L "$SOCK" list-panes -t reg -F '#{pane_id}' | head -1)
+    PATH="$SHIM:$PATH" python3 - "$RPANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
 import os, pty, select, sys, time, signal
 pane, out = sys.argv[1], sys.argv[2]
 pid, fd = pty.fork()
@@ -166,12 +174,11 @@ else:
             if d:
                 buf.extend(d)
     drain(0.8)               # initial paint (buffer kept empty)
-    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
-    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go to
-    # the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty selection.
-    # Confirm with `y`, NOT Enter: in this pty the 0x0d byte does not fire region's confirm
-    # action (only `y` does) — `\r` left region stuck in the TUI, the CI timeout.
-    for key in (b"gg", b"v", b"G", b"y"):
+    # Build the selection with `k` (PROVEN to move region's cursor on CI by
+    # tests/region_signal_keys.sh): `v` begins a linewise selection at the bottom row, `k`
+    # extends it upward (x8 clamps at the top => whole pane, holding the L1-L5 content),
+    # `y` confirms => render => exit 0. `y` not Enter: 0x0d doesn't fire confirm in this pty.
+    for key in [b"v"] + [b"k"]*8 + [b"y"]:
         os.write(fd, key)
         drain(0.2)
     # BOUNDED wait + SIGKILL: never hang the job (replaces the old blocking os.waitpid).
@@ -188,7 +195,7 @@ else:
         os.waitpid(pid, 0)
         import re
         rows = re.findall(rb'row:(\d+)', bytes(buf))
-        sys.exit("region: timed out after gg/v/G/y. file=" + str(os.path.exists(out))
+        sys.exit("region: timed out after v/k*8/y. file=" + str(os.path.exists(out))
                  + " tui_bytes=" + str(len(buf)) + " rows_seen=" + repr([r.decode() for r in rows[-8:]])
                  + " has_v_sel=" + str(b"VISUAL" in bytes(buf) or b"sel" in bytes(buf).lower()))
     if not os.path.exists(out):
@@ -198,7 +205,8 @@ PYEOF
     echo "  region: 1/1 confirm emits a complete §8.1 document (via python3 pty)"
 fi
 
-# --- teardown: ONLY the named isolated session (PRD §0 — never kill-server) --
+# --- teardown: ONLY the named isolated sessions (PRD §0 — never kill-server) --
 "$REAL_TMUX" -L "$SOCK" kill-session -t test 2>/dev/null || true
+"$REAL_TMUX" -L "$SOCK" kill-session -t reg 2>/dev/null || true
 
 echo "PASS: §8.1 end-to-end — every output path is a complete document (title/lang/bg correct; zero bare fragments)"
