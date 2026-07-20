@@ -100,12 +100,14 @@ stock binding, set `@tmux-2html-region-key` to a different key, for example
 ## The region overlay
 
 Press `prefix C-o` to open a pane-anchored, copy-mode-style overlay (sized to
-the current pane) over the scrollback. Move the cursor and select a region;
-press `v` to begin or re-anchor a linewise selection and `Ctrl-v` to toggle
-block mode; press `Enter` to render the selection to an HTML file, or `q` to
-cancel. The in-app status line lists every key. See
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full key list and
-behavior.
+the current pane) over the scrollback. Use the keyboard or the mouse: move the
+cursor with the arrow/hjkl keys or by clicking, select a region with `v` /
+`Ctrl-v` or by dragging (linewise by default, block with `Alt`), and scroll with
+the wheel (or `Ctrl-d` / `Ctrl-u`). Press `Enter` to render the selection to an
+HTML file, or cancel with `q`, `Esc`, or `Ctrl-c` (all exit `1`; other control
+keys such as `Ctrl-z` are ignored rather than suspending the popup). The in-app
+status line lists every key. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+for the full key list and behavior.
 
 ## Command line
 

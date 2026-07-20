@@ -28,7 +28,7 @@ This document is the reference for configuring and using tmux-2html. It covers:
 - **Palette cache** — how your terminal palette is captured, cached, and consumed.
 - **The sync-palette command** — `--from`, `--force`, and its exit behavior.
 - **Known limitations** — huge scrollback, alt-screen apps, wide characters,
-  OSC 8 hyperlinks, offline failure, and the two region-overlay deviations.
+  OSC 8 hyperlinks, offline failure, and the region-overlay search limitation.
 - **Attribution & license** — the project license and upstream notices.
 
 For installation and a feature overview, see the `README.md`.
@@ -185,15 +185,27 @@ covering only blank cells — a trailing blank line)** prints a warning, writes
 **no file and no `.last-output` sidecar**, and exits `1`.
 
 **Cancel** — `q`, `Ctrl-c`, or `Esc` with no selection exits `1` and produces no
-output. (An explicit `--output` overrides the default `<session>-<unixtime>-<pid>.html`
-filename; see [Known limitations](#known-limitations) for the concurrent-run
-naming.)
+output. `Ctrl-c` cancels like the other keys (exit `1`, not a signal death), and
+`Ctrl-z` is ignored — it does not suspend the popup. (An explicit `--output`
+overrides the default `<session>-<unixtime>-<pid>.html` filename; see
+[Known limitations](#known-limitations) for the concurrent-run naming.)
 
-### Mouse (not yet functional in v1)
+### Mouse
 
-Mouse input is **recognized** by the terminal layer but is not yet wired into
-the overlay, so click, drag, and wheel have no effect in v1. Use the keyboard.
-This is a known limitation — see [Known limitations](#known-limitations).
+The overlay supports the mouse (it enables SGR mouse reporting on entry),
+matching tmux copy-mode:
+
+- **Click** moves the cursor to the clicked cell and clears any active
+  selection. A click with no drag leaves no selection, so confirming right
+  after a click behaves like "no selection".
+- **Drag** selects: press and drag to extend a selection from the press cell to
+  the cursor. Dragging is **linewise** by default; hold **`Alt`** (or toggle it
+  mid-drag) for a **block** selection.
+- **Wheel** scrolls the viewport by half a page (like `Ctrl-d` / `Ctrl-u`) and
+  keeps the cursor in view.
+
+Mouse input is ignored while you are typing a search pattern. There is no
+option to enable or disable the mouse — it is always on, like the keyboard.
 
 ## Palette cache
 
@@ -351,9 +363,7 @@ For the cache location and file format, see [Palette cache](#palette-cache).
   download fails its SHA256 check, or there is no network, the download fails
   loudly with an instruction to install Zig and rebuild, or place a binary
   manually. The loader then flashes `tmux-2html: install failed (see README)`.
-- **Region overlay: mouse is not yet functional.** Mouse input is enabled and
-  decoded at the terminal layer, but the overlay loop never acts on it, so click,
-  drag, and wheel have no effect in v1. Use the keyboard.
+
 - **Region overlay: search is fixed-string, case-sensitive.** There is no regex
   search and no case-insensitive option in v1.
 - **Concurrent runs.** Output filenames are `<session>-<unixtime>-<pid>.html`
