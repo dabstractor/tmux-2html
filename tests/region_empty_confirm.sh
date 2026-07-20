@@ -91,8 +91,11 @@ else:
     # loop never services keys and a blocking waitpid hangs the job for hours (the CI hang).
     # Set a real size + SIGWINCH so the event loop reads input. Same fix as envelope_smoke.sh.
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-    os.kill(pid, signal.SIGWINCH)
-    time.sleep(0.8)           # let the TUI paint
+    time.sleep(0.8)           # let region start + install its SIGWINCH handler
+    os.kill(pid, signal.SIGWINCH)   # raise AFTER ready (immediate-at-fork SIGWINCH is lost:
+    time.sleep(0.2)           #   handler not installed, default=ignore -> region stays 0x0 ->
+                              #   CI timeout). region re-queries size on SIGWINCH, so this is
+                              #   robust. See envelope_smoke.sh for the full rationale.
     # gg+v+G selects the whole (blank) pane; confirm renders it => empty body => the Issue-1
     # guard fires (exit 1, no file). v+\r alone is a no-op confirm (region never exits).
     for key in (b"gg", b"v", b"G", b"\r"):

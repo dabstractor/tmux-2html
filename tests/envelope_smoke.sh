@@ -152,8 +152,12 @@ else:
     # 29764587186 (a non-interactive CI parent yields 0x0). Set a real size + raise SIGWINCH
     # so the event loop starts reading input. Verified: without this region ignores even `q`.
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-    os.kill(pid, signal.SIGWINCH)
-    time.sleep(0.8)           # let the TUI paint
+    time.sleep(0.8)           # let region start + install its SIGWINCH handler
+    os.kill(pid, signal.SIGWINCH)   # raise AFTER region is ready: an immediate-at-fork
+    time.sleep(0.2)           #   SIGWINCH is lost (default action = ignore; handler not yet
+                              #   installed) so region can stay 0x0 and ignore all input —
+                              #   the CI timeout. region re-queries size on SIGWINCH (verified:
+                              #   rescues even a forced 0x0 start), so the late signal is robust.
     # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
     # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go
     # to the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty selection
