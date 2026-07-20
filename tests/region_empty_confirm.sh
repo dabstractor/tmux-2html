@@ -54,22 +54,30 @@ SHIM=$WORK/shim; mkdir -p "$SHIM"
 printf '#!/bin/sh\nexec "%s" -L "%s" "$@"\n' "$REAL_TMUX" "$SOCK" > "$SHIM/tmux"
 chmod +x "$SHIM/tmux"
 
-"$REAL_TMUX" -L "$SOCK" new-session -d -s s -x 20 -y 6 || fail "isolated tmux new-session"
+# 80x10 (NOT 20x6): region's TUI only services input reliably at a normal pane size
+# (tiny panes hang the event loop), and the winsize set in the pty drive below needs a
+# non-tiny captured grid.
+"$REAL_TMUX" -L "$SOCK" new-session -d -s s -x 80 -y 10 || fail "isolated tmux new-session"
 PANE=$("$REAL_TMUX" -L "$SOCK" list-panes -t s -F '#{pane_id}' | head -1)
 
-# Seed content and force the cursor onto a BLANK row. PS1='' empties every prompt, so the
-# input line the cursor rests on (after echo+Enter) is provably blank regardless of the
-# default shell prompt (CI ubuntu bash uses `$ ` — WITHOUT PS1='' this test would false-fail).
+# Make the pane TRULY blank so a whole-pane selection is all blank cells => the rendered
+# body is empty => render.selectionBodyEmpty fires (PRD §13 => warn, exit 1, no file).
+# PS1='' kills the prompt; `clear` wipes the initial prompt line the new-session shell
+# prints before PS1 takes effect (without clear that one non-blank line makes the selection
+# non-empty => it renders => exit 0, false-pass).
 "$REAL_TMUX" -L "$SOCK" send-keys -t s "PS1=''" Enter
 sleep 0.3
-"$REAL_TMUX" -L "$SOCK" send-keys -t s "echo realcontent" Enter
+"$REAL_TMUX" -L "$SOCK" send-keys -t s "clear" Enter
 sleep 0.5
 
 rm -f "$OUT" "$SIDECAR"            # start clean (SIDECAR may linger from envelope_smoke's run)
 
-# --- drive region via python3 pty: b"v" (begin linewise on blank row) + b"\r" (confirm) ----
-# Asserts the FIXED behavior: exit 1, NO output file. (Without the S2 fix this writes an
-# empty file and exits 0 — the bug; the python sys.exit(non-zero) below makes `|| fail` fire.)
+# --- drive region via python3 pty: gg+v+G (whole-pane selection of the blank pane) + \r (confirm)
+# Asserts the FIXED behavior: exit 1, NO output file. The whole-pane selection is all blank
+# cells => render.selectionBodyEmpty fires => exit 1, no file (the S2/Issue-1 guard). A bare
+# v+\r (zero-extent) is a NO-OP confirm in region's TUI (never exits), so it cannot trigger
+# the guard; the whole-pane blank selection does. winsize+SIGWINCH+bounded-timeout mirror
+# envelope_smoke.sh (without them region ignores all input under a 0x0 CI parent => hang).
 PATH="$SHIM:$PATH" python3 - "$PANE" "$OUT" "$BIN" <<'PYEOF' || fail "region empty-confirm pty drive"
 import os, pty, select, sys, time, signal, struct, fcntl, termios
 pane, out, binary = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -85,9 +93,11 @@ else:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
     os.kill(pid, signal.SIGWINCH)
     time.sleep(0.8)           # let the TUI paint
-    os.write(fd, b"v")        # begin a linewise selection on the (blank) cursor row
-    time.sleep(0.2)
-    os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
+    # gg+v+G selects the whole (blank) pane; confirm renders it => empty body => the Issue-1
+    # guard fires (exit 1, no file). v+\r alone is a no-op confirm (region never exits).
+    for key in (b"gg", b"v", b"G", b"\r"):
+        os.write(fd, key)
+        time.sleep(0.2)
     # BOUNDED wait + SIGKILL: never hang the job. Capture the exit status via WNOHANG so we
     # can still assert the Issue-1 exit code below.
     deadline = time.time() + 10
