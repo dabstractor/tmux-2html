@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# pre-push — opt-in push gate that runs the Zig test suite (ReleaseFast) so you
+# can't push broken code. Pairs with pre-commit (which runs the safety scan).
+# Enable BOTH hooks with:
+#   git config core.hooksPath scripts/hooks
+# Disable both:
+#   git config --unset core.hooksPath
+#
+# WHY ReleaseFast (not Debug): PRD §15 + .github/workflows/ci.yml — Debug hits a
+# linker bug (R_X86_64_PC64) with the bundled C++ SIMD libs (simdutf/highway/
+# utfcpp via ghostty); ReleaseFast links cleanly and is exactly what CI runs.
+# So this hook runs the SAME command CI's `test` job does:
+#   zig build test -Doptimize=ReleaseFast
+# (275 tests: the golden harness testdata/*.ansi → byte-equal *.html, plus every
+# per-file unit test in cli/palette/render/capture/tui/region/main.)
+#
+# COST: a ReleaseFast build of ghostty + ~25 C++ deps + 275 tests. A cold run is
+# slow (several minutes); a warm run is much faster (zig global cache). That is
+# the deliberate trade for "can't push red". To skip once you have reviewed it:
+#   git push --no-verify          # discouraged; CI still enforces it
+#   T2H_PREPUSH_SKIP=1 git push   # same thing, env-var form
+#
+# NOT wrapped in scripts/safe-run.sh on purpose: ulimit -f can kill the linker
+# when ReleaseFast emits large .o/binary artifacts, turning a correct (if slow)
+# build into a confusing failure. `zig build test` terminates on its own — it is
+# the bespoke tmux-audit shim (AGENTS.md §0) that ran away, not this.
+#
+# This is ADVISORY, not enforcement: git hooks are local and bypassable with
+# --no-verify. CI (.github/workflows/ci.yml) is the real gate. This hook just
+# gives you fast local feedback before you burn a CI cycle.
+
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+# --- escape hatches ---------------------------------------------------------
+[ "${T2H_PREPUSH_SKIP:-0}" = "1" ] && { echo "pre-push: T2H_PREPUSH_SKIP=1 → skipping tests"; exit 0; }
+
+# Resolve zig: honor $ZIG if set, else look on PATH; skip gracefully if absent.
+if [ -n "${ZIG:-}" ]; then
+  ZIG_BIN="$ZIG"
+else
+  if ! command -v zig >/dev/null 2>&1; then
+    echo "pre-push: zig not found on PATH → skipping tests (install zig or set \$ZIG). CI still enforces this."
+    exit 0
+  fi
+  ZIG_BIN="$(command -v zig)"
+fi
+
+# --- smart skip: only run when source the tests compile actually changed ----
+# pre-push reads stdin lines of: "<local ref> <local sha> <remote ref> <remote sha>"
+# We collect every changed file across all refs being pushed, then run only if at
+# least one matches the compile-trigger set. Docs/markdown/yaml/images → instant push.
+# All-zero remote sha = brand-new ref (no common ancestor) → be conservative, run.
+SRC_RE='\.(zig|zon|h|c|cc|cxx|cpp|hpp)$'
+ZERO_RE='^0+$'
+
+force_run=0
+changed=()
+while read -r local_ref local_sha _ remote_sha; do   # git sends 4 fields; we ignore <remote ref>
+  if [[ "$remote_sha" =~ $ZERO_RE ]]; then
+    echo "pre-push: pushing new ref '$local_ref' → running tests"
+    force_run=1
+    break
+  fi
+  while read -r f; do
+    [ -n "$f" ] && changed+=("$f")
+  done < <(git diff --name-only "$remote_sha" "$local_sha")
+done
+
+if [ "$force_run" -eq 0 ]; then
+  if [ "${#changed[@]}" -eq 0 ]; then
+    echo "pre-push: no file changes in push → skipping tests"
+    exit 0
+  fi
+  src_changed=0
+  for f in "${changed[@]}"; do
+    if [[ "$f" =~ $SRC_RE ]]; then src_changed=1; break; fi
+  done
+  if [ "$src_changed" -eq 0 ]; then
+    echo "pre-push: push touches only non-source files → skipping tests"
+    exit 0
+  fi
+fi
+
+# --- run the same gate CI runs ----------------------------------------------
+# ZIG_HTTP_MAX_CONNS=1 mirrors ci.yml: caps the package manager's concurrent
+# HTTP fetches of ghostty + deps to avoid GitHub rate-limiting/connection
+# exhaustion on a cold cache.
+echo "pre-push: running 'zig build test -Doptimize=ReleaseFast' (same as ci.yml)."
+echo "          Cold = several minutes; warm zig cache is much faster."
+
+start=$(date +%s)
+if ! ( cd "$ROOT" && ZIG_HTTP_MAX_CONNS=1 "$ZIG_BIN" build test -Doptimize=ReleaseFast ); then
+  echo "pre-push: tests FAILED — not pushing." >&2
+  echo "  Fix the failures above, or bypass once you have reviewed the risk:" >&2
+  echo "    git push --no-verify          # discouraged; CI still enforces this" >&2
+  echo "    T2H_PREPUSH_SKIP=1 git push   # env-var form" >&2
+  exit 1
+fi
+elapsed=$(( $(date +%s) - start ))
+echo "pre-push: tests passed (${elapsed}s)."
+exit 0

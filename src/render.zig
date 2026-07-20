@@ -697,20 +697,51 @@ fn tempHtmlPath(alloc: std.mem.Allocator) ![]u8 {
     return std.fmt.allocPrint(alloc, "{s}/tmux-2html-{x}.html", .{ dir, val });
 }
 
-/// Spawn `xdg-open <path>` and REAP it (P1.M3.T1.S2; research/findings.md §5).
+/// Spawn `argv` fully DETACHED: launch it backgrounded via `/bin/sh` so THIS process never
+/// blocks on the child and leaves no zombie.
 ///
-/// CRITICAL (ghostty-org/ghostty#5999 — the project we depend on hit this exact bug):
-/// spawning xdg-open WITHOUT wait() leaves zombie xdg-open processes. xdg-open returns
-/// ~immediately (it hands off to the user's preferred app), so waiting never stalls the
-/// render. Any failure (xdg-open missing, headless, non-zero exit) is IGNORED — `--open`
-/// is best-effort ("open the output if you can; never fail the render because of it").
-pub fn spawnXdgOpen(path: []const u8, alloc: std.mem.Allocator) void {
-    var child = std.process.Child.init(&.{ "xdg-open", path }, alloc); // Child.zig:215
+/// Why (the Hyprland/Brave hang regression): on some desktops `xdg-open` launches the GUI app
+/// (a browser) and then WAITS for it to exit — so a naive `child.wait()` on xdg-open froze the
+/// render until the user closed the browser tab. Verified: `xdg-open <file>` on Hyprland with no
+/// browser running blocks past 3 s while it waits on Brave. The OLD code assumed "xdg-open returns
+/// ~immediately"; that is false whenever the opener's lifetime is tied to the app it opens.
+///
+/// The detach: the shell forks `argv` into the background and exits AT ONCE; we `wait()` only on
+/// that transient shell (returns immediately) so it is reaped, and `argv` re-parents to init
+/// (PID 1) which reaps it in turn — no zombie (the ghostty-org/ghostty#5999 concern), no block.
+/// stdin/out/err are sent to /dev/null so the backgrounded child cannot hold our pty open. `env`
+/// is the child's environment (`null` => inherit; tests pass a PATH-scoped map pointing at a fake
+/// opener so THIS process's env is never mutated). Best-effort throughout: any failure (`/bin/sh`
+/// missing, spawn error) is IGNORED — `--open` must never fail the render.
+///
+/// `argv[0]` is resolved by the shell (PATH unless absolute). Stack-built argv (cap 16) — fine for
+/// spawnXdgOpen's 2-element argv; fail closed if a caller ever exceeds it.
+fn spawnDetached(alloc: std.mem.Allocator, argv: []const []const u8, env: ?*const std.process.EnvMap) void {
+    var buf: [16][]const u8 = undefined;
+    buf[0] = "/bin/sh";
+    buf[1] = "-c";
+    buf[2] = "\"$@\" >/dev/null 2>&1 </dev/null &"; // background argv; all stdio to /dev/null
+    buf[3] = "sh"; // $0 (conventional placeholder); argv becomes $1..
+    var n: usize = 4;
+    for (argv) |a| {
+        if (n >= buf.len) return; // argv too long for the stack buffer => ignore (graceful)
+        buf[n] = a;
+        n += 1;
+    }
+    var child = std.process.Child.init(buf[0..n], alloc); // Child.zig:215
+    child.env_map = env; // null => inherit the current environment (Child.zig:54)
     child.stdin_behavior = .Ignore; // StdIo{Inherit,Ignore,Pipe,Close} (Child.zig:196)
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
-    child.spawn() catch return; // xdg-open missing / can't spawn => ignore (graceful)
-    _ = child.wait() catch return; // reap (no zombie); ignore exit status (ghostty #5999)
+    child.spawn() catch return; // /bin/sh missing / can't fork => ignore (graceful)
+    _ = child.wait() catch return; // reap the SHELL (exits at once); argv is now init's child
+}
+
+/// Open `path` in the user's preferred app via `xdg-open`, fully detached (P1.M3.T1.S2 + the
+/// Hyprland/Brave non-block fix). Best-effort: `--open` must NEVER fail the render. See
+/// `spawnDetached` for why we background + reap the shell instead of `wait()`ing xdg-open.
+pub fn spawnXdgOpen(path: []const u8, alloc: std.mem.Allocator) void {
+    spawnDetached(alloc, &.{ "xdg-open", path }, null);
 }
 
 /// Print a one-line size-error message to stderr (P1.M3.T1.S2; research/findings.md §6).
@@ -1307,11 +1338,77 @@ fn toPaletteMode(m: cli.PaletteMode) palette.Mode {
 }
 
 test "spawnXdgOpen: does not crash on a bogus path (xdg-open absent => ignored)" {
-    // Best-effort: in CI xdg-open is absent => spawn() fails => swallowed; the call returns.
-    // On a desktop with xdg-open it would open /nonexistent (which xdg-open tolerates). Either
-    // way this must not crash or leak (spawnXdgOpen takes the allocator only for Child.init,
-    // which does not retain it after wait/return).
+    // With the detached impl we spawn /bin/sh (always present) and run `xdg-open <bogus>` in the
+    // background; xdg-open absent (CI) => the background job fails silently (stdio to /dev/null),
+    // the shell exits, we reap it. Either way this must not crash or leak (spawnXdgOpen takes the
+    // allocator only for Child.init, which does not retain it after wait/return).
     spawnXdgOpen("/nonexistent", std.testing.allocator);
+}
+
+test "spawnDetached: returns promptly even when the child blocks (xdg-open→browser hang)" {
+    // REGRESSION for the Hyprland/Brave hang: xdg-open launched the browser and WAITED on it, so a
+    // naive child.wait() froze the render until the user closed the tab. spawnDetached backgrounds
+    // the child and reaps only the throwaway shell, so it MUST return far sooner than the fake
+    // opener's 10 s sleep. The fake is a real "xdg-open" reached via a PATH scoped to the CHILD
+    // ONLY (passed as child.env_map; this process's PATH is untouched => sibling tests are
+    // unaffected). The opener records its PID so the lingering sleeper is reaped, not left behind.
+    const alloc = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const dir_abs = try tmp.dir.realpathAlloc(alloc, ".");
+    defer alloc.free(dir_abs);
+    const marker = try std.fmt.allocPrint(alloc, "{s}/pid", .{dir_abs});
+    defer alloc.free(marker);
+
+    // Fake "xdg-open": write its PID ($$), then block 10 s (a browser that won't exit). +x via mode.
+    {
+        var f = try tmp.dir.createFile("xdg-open", .{ .mode = 0o755 });
+        defer f.close();
+        try f.writeAll("#!/bin/sh\necho $$ > \"$1\"\nsleep 10\n");
+    }
+
+    // Child-only env: a copy of this env with PATH narrowed to find BOTH the fake opener and
+    // `sleep`. EnvMap.put COPIES its args, so free the temp slice after the put.
+    var env = try std.process.getEnvMap(alloc);
+    defer env.deinit();
+    const path_val = try std.fmt.allocPrint(alloc, "{s}:/usr/bin:/bin", .{dir_abs});
+    defer alloc.free(path_val);
+    try env.put("PATH", path_val);
+    const env_ptr: *const std.process.EnvMap = &env;
+
+    // The deadline proof: must return in ≪ 10 s. 3 s is generous for fork+exec+shell-exit on any
+    // CI box and 3× under the sleeper — a blocking (pre-fix) implementation would blow through it.
+    const start = std.time.Instant.now() catch unreachable;
+    spawnDetached(alloc, &.{ "xdg-open", marker }, env_ptr);
+    const elapsed_ns = (std.time.Instant.now() catch unreachable).since(start);
+    if (elapsed_ns >= 3 * std.time.ns_per_s) {
+        std.debug.print(
+            "\n[spawnDetached] BLOCKED on the child: {d}ms elapsed (expected <3000; sleeper=10s)\n",
+            .{elapsed_ns / std.time.ns_per_ms},
+        );
+        return error.TestUnexpected;
+    }
+
+    // Hygiene: reap the lingering sleeper. It re-parented to init when its shell exited, so poll
+    // briefly for the PID marker (the opener writes it almost immediately) and signal it. A miss
+    // is harmless — the sleeper self-exits after its (short) sleep; this just keeps the box clean.
+    var pid_bytes: ?[]u8 = null;
+    defer if (pid_bytes) |b| alloc.free(b);
+    var attempts: usize = 0;
+    while (attempts < 200 and pid_bytes == null) : (attempts += 1) {
+        if (std.fs.cwd().readFileAlloc(alloc, marker, 64)) |b| {
+            pid_bytes = b;
+        } else |_| {
+            std.Thread.sleep(10 * std.time.ns_per_ms);
+        }
+    }
+    if (pid_bytes) |b| {
+        const pid_str = std.mem.trim(u8, b, " \t\n\r");
+        if (std.fmt.parseInt(std.posix.pid_t, pid_str, 10)) |pid| {
+            _ = std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+        } else |_| {}
+    }
 }
 
 // ---- S3 unit test (the bridge; PURE — no tty, no stdin, no ghostty-vt init) ----

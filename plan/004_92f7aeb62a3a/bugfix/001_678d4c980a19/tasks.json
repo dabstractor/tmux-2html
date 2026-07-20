@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Bug Fix Release — Region Empty-Confirm + Render Zero-Dimension Segfault + Safety Noise",
-      "status": "Planned",
+      "status": "Ready",
       "description": "Fix the two Major issues found during creative validation (Issue 1: region confirm writes an empty-body HTML file for blank-cell selection; Issue 2: render --cols 0 / --rows 0 segfaults) and the Minor check-safety.sh WARN noise (Issue 4). Issue 3 (stale .last-output sidecar) is resolved implicitly by the Issue 1 fix. All fixes reuse existing error infrastructure, helpers, and test patterns — no new dependencies.",
       "milestones": [
         {
@@ -154,21 +154,21 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Minor Polish — Reduce check-safety.sh WARN Noise from plan/ Documentation",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Issue 3 (stale .last-output sidecar) is fully resolved by the Issue 1 fix (P1.M1.T1.S2 breaks before the sidecar write; P1.M1.T1.S3 tests it). No separate work needed. Issue 4 (check-safety.sh emits 16 WARNs from plan/002_PRP.md) is cosmetic noise from documented test-harness recipes. Optionally scope the WARN rule to skip plan/ while keeping FAIL scanning active everywhere.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Suppress check-safety.sh WARN noise in plan/ (Issue 4)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "check-safety.sh WARN patterns (R3 shim_combo, R4 calls.log) scan plan/ documentation files and match PATH-shim recipes that are documented test-harness patterns, not live code. Add an exclusion for plan/ on WARN-only scans while keeping FAIL scanning active in plan/ (safety-critical patterns must still be caught everywhere).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Scope check-safety.sh WARN rules to skip plan/",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue4_check_safety_noise.md. scripts/check-safety.sh scans all text files under 2M (excluding .git, .zig-cache, zig-pkg, zig-out, .pi-subagents, node_modules, scratch). plan/ is NOT excluded. The WARN-scan condition near the bottom of the main scan loop is: if not under_scripts, then run shim_combo and WARN scan_pat. The function under_scripts() checks if a path starts with ROOT/scripts/. FAIL patterns (R1_KILL, kill-server, R2 recursive exec) run for ALL files unconditionally — they must continue to scan plan/. Only WARN patterns need the plan/ exclusion.\n2. INPUT: scripts/check-safety.sh (the full script). The functions under_scripts() and the main scan loop.\n3. LOGIC: Add a helper function under_plan() near under_scripts() that checks if a path starts with ROOT/plan/. Then change the WARN condition from: if not under_scripts then ... to: if not under_scripts AND not under_plan then ... This keeps FAIL scanning in plan/ (the FAIL scan_pat calls are above this conditional and run unconditionally) while suppressing WARN noise from plan/ documentation. Verify after the change: running scripts/check-safety.sh should report 0 WARNs (was 16) and 0 FAILs.\n4. OUTPUT: check-safety.sh reports 0 WARNs from plan/ files. FAIL scanning remains active everywhere. Exit code is 0 (no FAILs).\n5. DOCS: Mode A — Update the header comment in scripts/check-safety.sh (lines 10-14, the WARN section) to document that WARN patterns are suppressed in scripts/ AND plan/ (documented test-harness recipes), while FAIL patterns scan the entire repo. Add a one-line comment near under_plan() explaining the rationale.",
@@ -186,21 +186,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Sync Changeset-Level Documentation",
-          "status": "Planned",
+          "status": "Ready",
           "description": "Per SOW Mode B: sweep README.md and any overview docs to reflect the bug fixes shipped in this changeset. This is the catch-all that prevents the README from shipping stale after the implementation subtasks complete.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation",
-              "status": "Planned",
+              "status": "Ready",
               "description": "Review and update README.md, docs/, and any overview documentation to reflect the bug fixes in this changeset (empty-cell region confirm guard, zero-dimension render guard, check-safety plan/ scoping). Per SOW, implementing subtasks already update the docs they directly touch (Mode A); this task sweeps the cross-cutting/overview docs (Mode B).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Update README.md and overview docs to reflect bug fixes",
-                  "status": "Planned",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S2",

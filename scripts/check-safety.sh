@@ -11,9 +11,12 @@
 #           sanctioned teardown variant, so it is allowed).
 #   R2  recursive shim footgun: `exec tmux …` with a bare name instead of an
 #       absolute path / variable (PRD §0.1).
-# WARN (exit stays 0) everywhere EXCEPT scripts/ on:
+# WARN (exit stays 0) everywhere EXCEPT scripts/ AND plan/ on:
 #   R3  hand-rolled shim recipe (`PATH="…:$PATH"` + an `exec`/`>>` sink).
 #   R4  unbounded audit-log append (`>> …calls.log`).
+# (plan/ is human-authored PRP/research/tasks docs whose test-harness recipes are descriptions, not
+#  live code. FAIL rules below STILL scan the entire repo; should_skip() drops structured
+#  key-value prose like YAML/JSON "section: … exec tmux …" so docs that quote the patterns don't FAIL.)
 #
 # Precision: documentation is where a rule is *described*; code/snippets are
 # where it is *obeyed*. So lines that are prose/comment/search-context are
@@ -39,6 +42,10 @@ done
 
 is_text() { case "$(file -b --mime-type "$1" 2>/dev/null)" in text/*|*xml|*json|*javascript|*shellscript) return 0;; *) return 1;; esac; }
 under_scripts() { case "$1" in "$ROOT/scripts/"*|"$ROOT/scripts") return 0;; *) return 1;; esac; }
+# plan/ holds human-authored PRP/research/tasks docs that *describe* the safety patterns (e.g. a
+# YAML "section: … bare exec tmux …"). WARN is suppressed there (documented harness recipes); FAIL
+# still scans the whole repo — should_skip() drops the structured-prose FAIL matches (see below).
+under_plan() { case "$1" in "$ROOT/plan/"*|"$ROOT/plan") return 0;; *) return 1;; esac; }
 
 # Return 0 (skip) when a line is documentation/comment/search-context, not code.
 should_skip() {
@@ -51,6 +58,7 @@ should_skip() {
   case "$c" in '-') [ "${s:1:1}" = ' ' ] && return 0;; '*' ) [ "${s:1:1}" = ' ' ] && return 0;; esac  # md list/bullet
   # the line is itself scanning for the pattern (grep/rg/awk/sed), not running it
   if printf '%s' "$l" | grep -qE '\b(grep|rg|ack|ag|awk|sed)\b'; then return 0; fi
+  case "$s" in *:[[:space:]][\'\"]*) return 0;; esac   # structured key: "value" (YAML/JSON prose) => doc, not code
   return 1
 }
 
@@ -110,7 +118,7 @@ while IFS= read -r f; do
   scan_pat FAIL "$R1_KILL"   "$f" "$rel"
   scan_pat FAIL 'kill-server' "$f" "$rel" killserver
   scan_pat FAIL "$R2"        "$f" "$rel"
-  if ! under_scripts "$f"; then
+  if ! under_scripts "$f" && ! under_plan "$f"; then
     shim_combo "$f" "$rel"
     scan_pat WARN "$R4"      "$f" "$rel"
   fi
