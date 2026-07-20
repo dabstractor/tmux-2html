@@ -100,6 +100,15 @@ SHIM=$W/shim; mkdir -p "$SHIM"
 printf '#!/bin/sh\nexec "%s" -L "%s" "$@"\n' "$REAL_TMUX" "$SOCK" > "$SHIM/tmux"
 chmod +x "$SHIM/tmux"
 "$REAL_TMUX" -L "$SOCK" new-session -d -s test -x 80 -y 10 || fail "isolated tmux new-session"
+# Normalize the prompt to a minimal portable form BEFORE seeding content. Without this the
+# captured grid's layout — and therefore where the region TUI's copy-mode cursor rests — depends
+# on the host's DEFAULT shell/prompt (ubuntu CI bash `$ ` vs e.g. a Starship/Powerlevel multiline
+# prompt). That layout dependence is the root cause of the F1 region-confirm flake (validation
+# report 2026-07-20): on hosts with a multiline prompt the cursor landed on a blank row, `v`
+# began a linewise selection of empty cells, and the Issue-1 "selection is empty" guard rejected
+# the confirm (exit 1, no file). `PS1='$ '` collapses every shell to the same single-line prompt
+# so the grid is deterministic (mirrors tests/region_empty_confirm.sh's `PS1=''` technique).
+"$REAL_TMUX" -L "$SOCK" send-keys -t test "PS1='$ '" Enter
 "$REAL_TMUX" -L "$SOCK" send-keys -t test "printf '\\033[31mRED\\033[0m pane-content'" Enter
 # Wait until tmux has actually painted the printf OUTPUT before capturing. Replaces a flaky
 # fixed `sleep 0.5`: under CI load the capture could fire before the shell ran printf, so
