@@ -23,13 +23,16 @@ tmux-2html offers three capture modes:
 - **Full pane.** Captures the entire scrollback plus the visible rows. Use this
   to render everything the pane has produced.
 - **Visible pane.** Captures only the rows currently shown in the pane.
-- **Region.** Opens a copy-mode-style full-screen overlay over the scrollback
+- **Region.** Opens a copy-mode-style, pane-anchored overlay over the scrollback
+  (sized to the current pane — size the pane first to control the rendered width)
   and lets you select a line range or a block to render.
 
 ## Requirements
 
-- **tmux >= 3.2.** The region overlay and the one-time palette sync use
-  `display-popup`, which tmux 3.2 introduced.
+- **tmux >= 3.3.** The region overlay is a borderless, pane-anchored
+  `display-popup` (`-B` plus pane-positioned `-x`/`-y`), and those flags need
+  tmux 3.3. (`display-popup` itself is 3.2, and the one-time palette sync popup
+  uses only that — but the version floor follows the region overlay's flags.)
 - **Zig 0.15.2** is required only to build from source. Runtime users do not
   need Zig; the plugin fetches a prebuilt binary on first load.
 - **`xdg-open`** is optional. It auto-opens the HTML file after writing when
@@ -96,12 +99,13 @@ stock binding, set `@tmux-2html-region-key` to a different key, for example
 
 ## The region overlay
 
-Press `prefix C-o` to open a full-screen, copy-mode-style overlay over the pane
-scrollback. Move the cursor and select a region; press `v` to begin or re-anchor
-a linewise selection and `Ctrl-v` to toggle block mode; press `Enter` to render
-the selection to an HTML file, or `q` to cancel. The in-app status line lists
-every key. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full key
-list and behavior.
+Press `prefix C-o` to open a pane-anchored, copy-mode-style overlay (sized to
+the current pane) over the scrollback. Move the cursor and select a region;
+press `v` to begin or re-anchor a linewise selection and `Ctrl-v` to toggle
+block mode; press `Enter` to render the selection to an HTML file, or `q` to
+cancel. The in-app status line lists every key. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full key list and
+behavior.
 
 ## Command line
 
