@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Fix region confirm empty-cell HTML output (Issue 1)",
-              "status": "Researching",
+              "status": "Implementing",
               "description": "The region TUI .confirm arm (src/region.zig:438-506) guards only on !ctx.sel.active() ('was a selection begun?'), not on whether the selection renders non-blank content. An active selection over blank cells passes the guard, is rendered into a full HTML document via renderSelectionHtml, written to disk, sidecar'd, and exits 0. The sibling render --selection path already has the correct check (selectionBodyEmpty at render.zig:609), but that helper is module-private. Fix: make the helper pub, add the check in region.zig before writeHtmlAtomic/writeLastOutput, and add an integration test.",
               "subtasks": [
                 {
@@ -58,7 +58,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S3",
                   "title": "Add region integration test for blank-cell confirm (pty-driven)",
-                  "status": "Researching",
+                  "status": "Implementing",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S2"
@@ -86,7 +86,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Guard determineCols against explicit --cols 0",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 0.5,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md. The function determineCols at src/render.zig:95-100 has: if (opts_cols) |c| return c; — it returns the explicit --cols value with NO lower-bound check. The tty-derived branch (getSize at render.zig:81) ALREADY rejects zero (if ws.col == 0 or ws.row == 0 then return error.InvalidWindowSize), but the CLI value bypasses it. SizeError.InvalidWindowSize already exists (render.zig:45) and is already mapped to exit 2 + stderr message by reportSizeError (render.zig:715-723) and run() catch (render.zig:751-754). No new error-reporting code is needed.\n2. INPUT: The function pub fn determineCols(opts_cols: ?u16, has_tty: bool) SizeError!u16 at src/render.zig:95.\n3. LOGIC: Change the first arm from a bare return to a validated return. If c < 1, return error.InvalidWindowSize (which triggers the existing exit-2 path). Otherwise return c. This makes --cols 0 produce exit 2 (not exit 139 segfault) via the existing run() catch, reportSizeError, stderr message, return 2 plumbing. Do NOT change the tty branch or the SizeRequired branch.\n4. OUTPUT: determineCols(0, false) returns error.InvalidWindowSize. determineCols(1, false) and determineCols(80, false) still return 1 and 80 respectively. The function signature is unchanged.\n5. DOCS: none — the error message is already defined in reportSizeError; no new user-facing message is added.",

@@ -111,6 +111,11 @@ jobs:
       - name: §8.1 envelope integration smoke
         run: sh tests/envelope_smoke.sh
 
+      - name: region empty-cell confirm regression (Issue 1)
+        # python3 pre-installed on ubuntu-latest; tmux installed above. Drives the region
+        # TUI via a pty and asserts a blank-cell confirm warns + exits 1 + writes nothing.
+        run: sh tests/region_empty_confirm.sh
+
   # Plugin option threading test (P1.M1.T2.S1). A separate, dependency-free job: it sources
   # tmux-2html.tmux under a MOCKED `tmux()` shell function (never a real tmux binary/socket —
   # PRD §0-safe) and asserts the §8.1 options @tmux-2html-title/@tmux-2html-lang thread into all
