@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "TTY control-key / signal robustness (Issues 2 & 3 — ISIG root cause)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Disable ISIG in app.makeRaw so tty control characters (Ctrl-c/Ctrl-z/Ctrl-\\) arrive as inert bytes that input.zig classifies, instead of being translated into signals by the kernel. This one-line fix resolves BOTH Issue 2 (Ctrl-z no longer suspends/freezes) and Issue 3 (Ctrl-c ⇒ exit 1 via the existing 0x03→.quit mapping, not 130). palette.zig's separate raw-mode is out of scope. Add a regression harness that drives the real binary through a pty with 0x1a/0x03.",
           "tasks": [
             {
@@ -44,14 +44,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Regression harness for Ctrl-z (no suspend) + Ctrl-c (exit 1)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Add tests/region_signal_keys.sh — a python3 pty drive over an isolated tmux socket that sends 0x1a (Ctrl-z) and 0x03 (Ctrl-c) to the real region binary and asserts Ctrl-z does NOT suspend the process (status line keeps repainting) and Ctrl-c exits 1 (not 130) with no output/sidecar. Follows the canonical tests/region_empty_confirm.sh pattern.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Create tests/region_signal_keys.sh (python3 pty: 0x1a no-suspend, 0x03 exit-1)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
@@ -88,7 +88,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T1.S1",
                   "title": "Add pure mouseCell() SGR→grid coordinate conversion + unit tests",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: SGR MouseEvent.x/y are 1-BASED character cells on the popup screen (src/tui/app.zig MouseEvent doc). view.render maps grid row gy = viewport.scroll + vy where vy = (screen row - 1), and grid col gx = (screen col - 1); the status line occupies screen row `tty_rows` = viewport row `grid_rows` (grid area is rows 0..grid_rows-1). So a 1-based click (sx,sy) ⇒ gx=sx-1, vy=sy-1, gy=scroll+vy. See architecture/mouse_wiring_design.md + architecture/system_context.md.\n2. INPUT: `app.MouseEvent` (src/tui/app.zig: fields x:u32, y:u32 — 1-based) and `view.Pos` (src/tui/view.zig: {x:u32, y:u32}). Consumed by applyMouse (P1.M2.T1.S2).\n3. LOGIC: add a module-private PURE fn in src/region.zig: `fn mouseCell(sx: u32, sy: u32, scroll: u32, grid_rows: u16, total_rows: u32, tty_cols: u16) view.Pos`. Compute gx = clamp(sx-1, 0, tty_cols-1); vy = clamp(sy-1, 0, grid_rows-1) [excludes the status-line row]; gy = clamp(scroll + vy, 0, total_rows-1). Use SATURATING arithmetic (`@as(u32, tty_cols) -| 1`, `@as(u32, grid_rows) -| 1`, `+|`) and guard total_rows==0 so there is NO u32 underflow. Return .{ .x = gx, .y = gy }. Add separate `test` fns (mouseCell is PURE — constructs NO Terminal ⇒ safe as a separate test fn in region.zig, which already has many such pure-helper tests): plain click maps sx-1/sy-1; a click on the status-line row (sy > grid_rows) clamps vy to grid_rows-1 (last grid row); scroll offset is applied (gy = scroll+vy); gx clamps to tty_cols-1; gy clamps to total_rows-1; degenerate grid_rows==0 and tty_cols==0 do NOT underflow. Mock nothing.\n4. OUTPUT: the pure mouseCell fn, consumed by applyMouse in P1.M2.T1.S2.\n5. DOCS: [Mode A] add a doc-comment on mouseCell documenting the 1-based→0-based conversion, the viewport.scroll offset, and the status-line-row exclusion. No user-facing / config surface change.",
