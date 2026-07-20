@@ -138,7 +138,7 @@ if [ "$have_py" -eq 0 ]; then
 else
     ROF=$W/region.html; rm -f "$ROF"
     PATH="$SHIM:$PATH" python3 - "$PANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
-import os, pty, select, sys, time, signal, struct, fcntl, termios
+import os, pty, select, sys, time, signal
 pane, out = sys.argv[1], sys.argv[2]
 pid, fd = pty.fork()
 if pid == 0:
@@ -146,42 +146,36 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    # pty.fork() leaves the pty window size at 0x0. region's TUI still paints (default size)
-    # but its input loop then NEVER services keys — the TUI sits idle and a blocking
-    # waitpid hangs the job for hours. That is what hung CI runs 29755955109 / 29762462640 /
-    # 29764587186 (a non-interactive CI parent yields 0x0). Set a real size + raise SIGWINCH
-    # so the event loop starts reading input. Verified: without this region ignores even `q`.
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-    time.sleep(0.8)           # let region start + install its SIGWINCH handler
-    os.kill(pid, signal.SIGWINCH)   # raise AFTER region is ready: an immediate-at-fork
-    time.sleep(0.2)           #   SIGWINCH is lost (default action = ignore; handler not yet
-                              #   installed) so region can stay 0x0 and ignore all input —
-                              #   the CI timeout. region re-queries size on SIGWINCH (verified:
-                              #   rescues even a forced 0x0 start), so the late signal is robust.
-    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
-    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go
-    # to the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty selection
-    # (contains the colored content). Without the post-`v` motion the Issue-1 empty guard
-    # rejects it.
-    for key in (b"gg", b"v", b"G", b"\r"):
-        os.write(fd, key)
-        time.sleep(0.2)
-    # BOUNDED wait + SIGKILL: even if region never exits for any reason, FAIL in ~10s
-    # instead of hanging the job for 6h. Replaces the old blocking os.waitpid(pid, 0).
-    # Captures region's TUI output so a timeout prints its last status line on the CI log
-    # (diagnoses whether region received the keystrokes vs ignored input entirely).
-    deadline = time.time() + 10
-    exited = False
-    tui = bytearray()
-    while time.time() < deadline:
-        r, _, _ = select.select([fd], [], [], 0.1)
-        if r:
+    # DRAIN the pty output during every wait (NOT bare time.sleep): region repaints on each
+    # event, and if the output buffer fills while we sleep region blocks on its paint write
+    # and never reads our keystrokes — the TUI sits idle and a blocking waitpid hangs the
+    # job for hours (CI runs 29755955109/29762462640/29764587186/29784104914 all died here).
+    # Draining keeps the buffer empty so region services input. This is the SAME mechanic
+    # the CI-green tests/region_signal_keys.sh uses (proven on CI) — no winsize/SIGWINCH.
+    def drain(secs):
+        end = time.time() + secs
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                continue
             try:
-                chunk = os.read(fd, 4096)
+                os.read(fd, 8192)
             except OSError:
                 break
-            if chunk:
-                tui.extend(chunk)
+    drain(0.8)               # initial paint (buffer kept empty)
+    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
+    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go to
+    # the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty selection.
+    # Confirm with `y`, NOT Enter: in this pty the 0x0d byte does not fire region's confirm
+    # action (only `y` does) — `\r` left region stuck in the TUI, the CI timeout.
+    for key in (b"gg", b"v", b"G", b"y"):
+        os.write(fd, key)
+        drain(0.2)
+    # BOUNDED wait + SIGKILL: never hang the job (replaces the old blocking os.waitpid).
+    deadline = time.time() + 10
+    exited = False
+    while time.time() < deadline:
+        drain(0.1)
         wpid, _ = os.waitpid(pid, os.WNOHANG)
         if wpid != 0:
             exited = True
@@ -189,12 +183,7 @@ else:
     if not exited:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-        dec = bytes(tui).decode("utf-8", "replace")
-        dec = "".join(c for c in dec if c >= " " or c in "\n\r\t")
-        lines = [ln.strip() for ln in dec.replace("\r", "\n").split("\n") if ln.strip()]
-        tail = (lines[-1][:200] if lines else "(no TUI output)")
-        sys.exit("region: timed out after gg/v/G/Enter. file=" + str(os.path.exists(out))
-                 + " tui_bytes=" + str(len(tui)) + " last_status=" + repr(tail))
+        sys.exit("region: timed out (did not exit after gg/v/G/y)")
     if not os.path.exists(out):
         sys.exit("region: no output file written (confirm did not fire)")
 PYEOF

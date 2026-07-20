@@ -79,7 +79,7 @@ rm -f "$OUT" "$SIDECAR"            # start clean (SIDECAR may linger from envelo
 # the guard; the whole-pane blank selection does. winsize+SIGWINCH+bounded-timeout mirror
 # envelope_smoke.sh (without them region ignores all input under a 0x0 CI parent => hang).
 PATH="$SHIM:$PATH" python3 - "$PANE" "$OUT" "$BIN" <<'PYEOF' || fail "region empty-confirm pty drive"
-import os, pty, select, sys, time, signal, struct, fcntl, termios
+import os, pty, select, sys, time, signal
 pane, out, binary = sys.argv[1], sys.argv[2], sys.argv[3]
 pid, fd = pty.fork()
 if pid == 0:
@@ -87,32 +87,33 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    # pty.fork() leaves the pty window size at 0x0; region's TUI then paints but its input
-    # loop never services keys and a blocking waitpid hangs the job for hours (the CI hang).
-    # Set a real size + SIGWINCH so the event loop reads input. Same fix as envelope_smoke.sh.
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-    time.sleep(0.8)           # let region start + install its SIGWINCH handler
-    os.kill(pid, signal.SIGWINCH)   # raise AFTER ready (immediate-at-fork SIGWINCH is lost:
-    time.sleep(0.2)           #   handler not installed, default=ignore -> region stays 0x0 ->
-                              #   CI timeout). region re-queries size on SIGWINCH, so this is
-                              #   robust. See envelope_smoke.sh for the full rationale.
-    # gg+v+G selects the whole (blank) pane; confirm renders it => empty body => the Issue-1
-    # guard fires (exit 1, no file). v+\r alone is a no-op confirm (region never exits).
-    for key in (b"gg", b"v", b"G", b"\r"):
+    # DRAIN during every wait (NOT bare sleep) so region's repaint output never fills the
+    # pty buffer and blocks the TUI's input loop (the CI hang). Same proven mechanic as
+    # tests/region_signal_keys.sh (CI-green) and tests/envelope_smoke.sh. No winsize/SIGWINCH.
+    def drain(secs):
+        end = time.time() + secs
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                continue
+            try:
+                os.read(fd, 8192)
+            except OSError:
+                break
+    drain(0.8)               # initial paint (buffer kept empty)
+    # gg+v+G selects the whole (blank) pane; `y` confirms => renders an all-blank body =>
+    # render.selectionBodyEmpty fires (exit 1, no file — the Issue-1 guard). Confirm with
+    # `y` not Enter: in this pty 0x0d does not fire region's confirm (only `y` does).
+    for key in (b"gg", b"v", b"G", b"y"):
         os.write(fd, key)
-        time.sleep(0.2)
+        drain(0.2)
     # BOUNDED wait + SIGKILL: never hang the job. Capture the exit status via WNOHANG so we
     # can still assert the Issue-1 exit code below.
     deadline = time.time() + 10
     status = 0
     exited = False
     while time.time() < deadline:
-        r, _, _ = select.select([fd], [], [], 0.1)
-        if r:
-            try:
-                os.read(fd, 4096)
-            except OSError:
-                break
+        drain(0.1)
         wpid, st = os.waitpid(pid, os.WNOHANG)
         if wpid != 0:
             status, exited = st, True
