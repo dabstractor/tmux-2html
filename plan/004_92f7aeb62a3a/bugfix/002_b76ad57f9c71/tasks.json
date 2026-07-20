@@ -74,7 +74,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Mouse support wiring (Issue 1 — PRD §7.6)",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Make mouse input functional in the region overlay: click moves the cursor; drag selects (linewise by default, block with Alt); wheel scrolls. app.zig already enables SGR mouse reporting and decodes every event into app.MouseEvent, but regionHandle has no .mouse arm so the decoded events are discarded. The fix is pure glue over existing unit-tested primitives (motion.Cursor, select.Sel, view.* scroll fns), implemented entirely in region.zig: a pure coordinate-conversion fn, a pure mouse state-machine fn, the RegionCtx.mouse_anchor field, and a .mouse arm in regionHandle. Plus an integration harness that SGR-clicks/drags/wheels the real binary through a pty.",
           "tasks": [
             {
@@ -122,14 +122,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Wire the .mouse arm into regionHandle + add RegionCtx.mouse_anchor",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Connect the pure mouse logic to the live event loop: add a `mouse_anchor: ?view.Pos` field to RegionCtx and a `.mouse` arm to regionHandle (before the input.feed call, since feed returns null for mouse) that calls applyMouse + repaint. Update the stale doc-comment that called mouse a NO-OP follow-up.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "Add RegionCtx.mouse_anchor field + .mouse arm in regionHandle + doc-comment update",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1",
@@ -149,14 +149,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Mouse integration harness (Issue 1 / §7.6 validation)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Add tests/region_mouse.sh — a python3 pty drive over an isolated tmux socket that sends real SGR mouse sequences (click/drag/wheel) to the region binary and asserts: a click moves the cursor (status row:/col: changes), a drag→confirm writes a correct HTML file, and the wheel scrolls the viewport. Follows the canonical tests/region_empty_confirm.sh pattern.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Create tests/region_mouse.sh (python3 pty: SGR click/drag/wheel assertions)",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1"

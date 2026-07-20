@@ -96,6 +96,7 @@ const RegionCtx = struct {
     font: []const u8, // opts.font (S2 passes to renderGrid; S1 paints with colors only)
     cursor: motion.Cursor,
     sel: select.Sel,
+    mouse_anchor: ?view.Pos = null, // PRD §7.6: drag anchor (set on press, cleared on release); null = no drag
     mgrid: motion.Grid,
     decoder: input.Decoder = .{},
     search: motion.SearchState = .{},
@@ -227,25 +228,40 @@ fn applyMouse(
 /// Repaint errors are swallowed (the TUI must not crash on a transient write
 /// error; matches app.zig's resilient-write stance).
 ///
+/// MOUSE (PRD §7.6): a `.mouse` event is consumed FIRST — before the keyboard
+/// decoder — via applyMouse (the click/drag/wheel state machine: click moves the
+/// cursor, drag selects [linewise by default, block with Alt], wheel scrolls),
+/// then repaint + return .none. (Mouse is ignored in SEARCH MODE — handleSearchByte
+/// returns .none for non-key events.)
+///
 /// SEARCH MODE: when `searching` is true, raw bytes are collected directly into
 /// pattern_buf (the input decoder is idle). Enter finalizes, Esc cancels,
 /// Backspace edits, printable appends (handleSearchByte).
 ///
-/// NORMAL MODE: feed the decoder. On a decoded Key: motion => applyMotion +
-/// sync sel.cursor + repaint; action => quit/confirm/clear-or-quit/else
-/// select.applyAction; search => handleSearchAction. feed returns null while
-/// accumulating (digit/g), on .eof/.mouse, or on an ignored byte.
+/// NORMAL MODE (keyboard): feed the decoder. On a decoded Key: motion =>
+/// applyMotion + sync sel.cursor + repaint; action => quit/confirm/clear-or-quit/
+/// else select.applyAction; search => handleSearchAction. feed returns null while
+/// accumulating (digit/g), on .eof/.seq, or on an ignored byte (.mouse never
+/// reaches feed — it is consumed above).
 ///
 /// Esc clear-vs-quit is REGION's decision (NOT input's/select's): on .clear, if
 /// sel.active() => clear + repaint (stay in TUI); else => .quit (PRD 7.4/7.5).
-/// Mouse is a NO-OP in S1 (PRD 7.6 mouse wiring is a follow-up; .none keeps the
-/// loop alive). app.zig already DECODES SGR mouse; a later task only adds the
-/// regionHandle mouse branch.
 fn regionHandle(opaque_ctx: ?*anyopaque, ev: app.Event) app.Action {
     const ctx: *RegionCtx = @ptrCast(@alignCast(opaque_ctx.?));
 
     // ---- SEARCH MODE: collect pattern bytes directly (decoder idle) ----
     if (ctx.searching) return handleSearchByte(ctx, ev);
+
+    // ---- MOUSE (PRD §7.6): consume the decoded SGR event BEFORE the keyboard decoder ----
+    // click moves cursor; drag selects (linewise default, block with Alt); wheel scrolls.
+    switch (ev) {
+        .mouse => |m| {
+            applyMouse(&ctx.cursor, &ctx.sel, &ctx.mouse_anchor, m, ctx.grid_rows, ctx.total_rows, ctx.tty_cols);
+            repaint(ctx) catch {};
+            return .none;
+        },
+        else => {}, // key / seq / eof fall through to the keyboard decoder below
+    }
 
     // ---- NORMAL MODE: feed the decoder ----
     if (input.feed(&ctx.decoder, ev)) |key| {
@@ -272,7 +288,7 @@ fn regionHandle(opaque_ctx: ?*anyopaque, ev: app.Event) app.Action {
             .search => |s| handleSearchAction(ctx, s),
         }
     }
-    // input.feed returns null while accumulating (digit/g), on .eof/.mouse, or on an ignored byte.
+    // input.feed returns null while accumulating (digit/g), on .eof/.seq, or on an ignored byte (.mouse is consumed above).
     return .none;
 }
 
