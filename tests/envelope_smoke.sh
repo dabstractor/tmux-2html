@@ -152,6 +152,7 @@ else:
     # job for hours (CI runs 29755955109/29762462640/29764587186/29784104914 all died here).
     # Draining keeps the buffer empty so region services input. This is the SAME mechanic
     # the CI-green tests/region_signal_keys.sh uses (proven on CI) — no winsize/SIGWINCH.
+    buf = bytearray()
     def drain(secs):
         end = time.time() + secs
         while time.time() < end:
@@ -159,9 +160,11 @@ else:
             if not r:
                 continue
             try:
-                os.read(fd, 8192)
+                d = os.read(fd, 8192)
             except OSError:
                 break
+            if d:
+                buf.extend(d)
     drain(0.8)               # initial paint (buffer kept empty)
     # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; extend it by MOVING
     # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so go to
@@ -183,7 +186,11 @@ else:
     if not exited:
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-        sys.exit("region: timed out (did not exit after gg/v/G/y)")
+        import re
+        rows = re.findall(rb'row:(\d+)', bytes(buf))
+        sys.exit("region: timed out after gg/v/G/y. file=" + str(os.path.exists(out))
+                 + " tui_bytes=" + str(len(buf)) + " rows_seen=" + repr([r.decode() for r in rows[-8:]])
+                 + " has_v_sel=" + str(b"VISUAL" in bytes(buf) or b"sel" in bytes(buf).lower()))
     if not os.path.exists(out):
         sys.exit("region: no output file written (confirm did not fire)")
 PYEOF
