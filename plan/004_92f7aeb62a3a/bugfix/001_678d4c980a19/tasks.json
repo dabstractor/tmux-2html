@@ -11,7 +11,7 @@
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Major Issue Fixes — Region Empty-Cell Confirm Guard + Render Zero-Dimension Segfault Prevention",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Fix Issue 1 (region .confirm arm renders+writes empty-body HTML for active selections over blank cells) and Issue 2 (render --cols 0 / --rows 0 crashes ghostty-vt Terminal.init with SIGSEGV exit 139). Both fixes are small, surgical changes to existing code paths with established error-handling infrastructure.",
           "tasks": [
             {
@@ -79,7 +79,7 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Fix render --cols 0 / --rows 0 segfault (Issue 2)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "render --cols 0 (or --rows 0) is accepted by the CLI parser, flows unchecked through determineCols/render.run() into Size then renderGrid then Terminal.init with cols=0/rows=0, which segfaults in ghostty-vt (exit 139 SIGSEGV + core dump). The pane path already guards this indirectly (main.zig:500-506). Fix: reject zero dimensions at the sizing layer using the existing SizeError.InvalidWindowSize to exit 2 infrastructure. Also defensively guard region.zig Terminal.init (which bypasses renderGrid).",
               "subtasks": [
                 {
@@ -116,7 +116,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S3",
                   "title": "Defensively guard region.zig Terminal.init against zero dimensions",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [],
                   "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md Fix Site 3 section. region.zig builds its Terminal DIRECTLY at line 326 (NOT via renderGrid), so the render.zig guards do not cover it. cap.cols and cap.rows come from capture.geometry() which parses tmux display-message output — for real panes these are always >= 1, but a degenerate or resized pane could theoretically yield 0. The existing pane guard at main.zig:500-506 (keyed on result.code != 0) shows the correct pattern. The comment there explicitly documents the ghostty-vt zero-dimension segfault.\n2. INPUT: cap.cols (u16) and cap.rows (u16) from the capture.Captured struct, available in regionHandle at src/region.zig before line 326.\n3. LOGIC: Before the Terminal.init call at region.zig:326, add a guard: if cap.cols < 1 or cap.rows < 1, write a message to stderr (e.g. tmux-2html region: capture has zero-dimension pane geometry) and return 2 (capture error per PRD 5). Obtain stderr via std.fs.File.stderr() if not already in scope at that point in the code. This mirrors main.zig:500-506 rationale.\n4. OUTPUT: A zero-dimension capture (cols=0 or rows=0) in region exits 2 with a stderr message instead of segfaulting.\n5. DOCS: none — defensive internal guard; for normal pane geometries there is no user-facing behavior change.",
@@ -131,7 +131,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T2.S4",
                   "title": "Add unit and integration tests for zero-dimension rejection",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T2.S1",
