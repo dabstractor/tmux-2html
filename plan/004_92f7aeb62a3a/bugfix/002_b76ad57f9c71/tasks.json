@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Region TUI Input-Surface Bugfixes (Round 2)",
-      "status": "Planned",
+      "status": "Researching",
       "description": "Fix the three region-TUI gaps from end-to-end creative validation round 2: (1) wire up mouse support (PRD §7.6) — currently decoded but discarded; (2) stop Ctrl-z/SIGTSTP from freezing the popup with the terminal unrestored; (3) make Ctrl-c exit 1 per §7.5 (currently 130). Issues 2 and 3 share a single one-line root cause (ISIG not disabled in app.makeRaw). All work is scoped to the region TUI input surface; the core capture→HTML flows and keyboard selection are unaffected. See plan/004_92f7aeb62a3a/bugfix/002_b76ad57f9c71/architecture/ for validated findings.",
       "milestones": [
         {
@@ -74,7 +74,7 @@
           "type": "Milestone",
           "id": "P1.M2",
           "title": "Mouse support wiring (Issue 1 — PRD §7.6)",
-          "status": "Researching",
+          "status": "Complete",
           "description": "Make mouse input functional in the region overlay: click moves the cursor; drag selects (linewise by default, block with Alt); wheel scrolls. app.zig already enables SGR mouse reporting and decodes every event into app.MouseEvent, but regionHandle has no .mouse arm so the decoded events are discarded. The fix is pure glue over existing unit-tested primitives (motion.Cursor, select.Sel, view.* scroll fns), implemented entirely in region.zig: a pure coordinate-conversion fn, a pure mouse state-machine fn, the RegionCtx.mouse_anchor field, and a .mouse arm in regionHandle. Plus an integration harness that SGR-clicks/drags/wheels the real binary through a pty.",
           "tasks": [
             {
@@ -149,14 +149,14 @@
               "type": "Task",
               "id": "P1.M2.T3",
               "title": "Mouse integration harness (Issue 1 / §7.6 validation)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Add tests/region_mouse.sh — a python3 pty drive over an isolated tmux socket that sends real SGR mouse sequences (click/drag/wheel) to the region binary and asserts: a click moves the cursor (status row:/col: changes), a drag→confirm writes a correct HTML file, and the wheel scrolls the viewport. Follows the canonical tests/region_empty_confirm.sh pattern.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T3.S1",
                   "title": "Create tests/region_mouse.sh (python3 pty: SGR click/drag/wheel assertions)",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T2.S1"
@@ -177,21 +177,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Sync changeset-level documentation",
-          "status": "Planned",
+          "status": "Researching",
           "description": "Final cross-cutting docs sweep (Mode B): update README.md's region/copy-mode-TUI feature section and docs/CONFIGURATION.md's region-keys reference to reflect that mouse is now supported (§7.6) and that Ctrl-c exits 1 / Ctrl-z is ignored. No new options/env/flags were added. This task depends on ALL implementing subtasks and runs last.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation (README + CONFIGURATION)",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Update the user-facing docs that summarize the region TUI to surface mouse support and the corrected signal-key behavior. README.md feature blurbs + docs/CONFIGURATION.md region-keys reference.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Update README.md region/mouse feature section + docs/CONFIGURATION.md region-keys reference",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1",
