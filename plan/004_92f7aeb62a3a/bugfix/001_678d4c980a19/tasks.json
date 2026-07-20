@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Bug Fix Release — Region Empty-Confirm + Render Zero-Dimension Segfault + Safety Noise",
-      "status": "Researching",
+      "status": "Planned",
       "description": "Fix the two Major issues found during creative validation (Issue 1: region confirm writes an empty-body HTML file for blank-cell selection; Issue 2: render --cols 0 / --rows 0 segfaults) and the Minor check-safety.sh WARN noise (Issue 4). Issue 3 (stale .last-output sidecar) is resolved implicitly by the Issue 1 fix. All fixes reuse existing error infrastructure, helpers, and test patterns — no new dependencies.",
       "milestones": [
         {
@@ -25,21 +25,34 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S1",
                   "title": "Make selectionBodyEmpty pub in render.zig",
-                  "status": "Planned",
+                  "status": "Complete",
                   "story_points": 0.5,
                   "dependencies": [],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.0"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md. The function selectionBodyEmpty at src/render.zig:609 is declared fn (module-private). It must become pub fn so region.zig can call it. The existing unit test at render.zig:1317-1329 will continue to pass unchanged — this is a visibility change only, no logic change.\n2. INPUT: The existing function fn selectionBodyEmpty(html: []const u8) bool at src/render.zig:609. No new data needed.\n3. LOGIC: Change ONLY the visibility keyword: fn selectionBodyEmpty to pub fn selectionBodyEmpty. Do NOT change the function body, its algorithm, or its callers within render.zig (render.zig:789 calls it in the --selection arm; that call stays identical). The function scans the body between the first <pre tag opening > and the next </pre> for any non-whitespace byte; returns true if all-whitespace/empty, false otherwise (including malformed HTML, which returns false as a safe non-empty fallback).\n4. OUTPUT: render.selectionBodyEmpty becomes callable from other modules (specifically region.zig). No return type or behavior change.\n5. DOCS: none — internal visibility change only, no user-facing/config/API surface change."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md. The function selectionBodyEmpty at src/render.zig:609 is declared fn (module-private). It must become pub fn so region.zig can call it. The existing unit test at render.zig:1317-1329 will continue to pass unchanged — this is a visibility change only, no logic change.\n2. INPUT: The existing function fn selectionBodyEmpty(html: []const u8) bool at src/render.zig:609. No new data needed.\n3. LOGIC: Change ONLY the visibility keyword: fn selectionBodyEmpty to pub fn selectionBodyEmpty. Do NOT change the function body, its algorithm, or its callers within render.zig (render.zig:789 calls it in the --selection arm; that call stays identical). The function scans the body between the first <pre tag opening > and the next </pre> for any non-whitespace byte; returns true if all-whitespace/empty, false otherwise (including malformed HTML, which returns false as a safe non-empty fallback).\n4. OUTPUT: render.selectionBodyEmpty becomes callable from other modules (specifically region.zig). No return type or behavior change.\n5. DOCS: none — internal visibility change only, no user-facing/config/API surface change.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.0"
+                  ]
                 },
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T1.S2",
                   "title": "Add empty-selection guard in region.zig confirm arm",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T1.S1"],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.0", "h3.2"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md. The .confirm arm in src/region.zig (labeled confirm_render:) currently guards only on !ctx.sel.active() (line ~445). After that guard passes, it renders via renderSelectionHtml (line ~471) which returns a FULL 8.1-spec HTML document (envelope already wrapped by render.writeDocumentBytes). The check must be inserted AFTER defer allocator.free(html); (line ~475) and BEFORE resolveOutputPath/makePath/writeHtmlAtomic (lines ~479-487), so that when the selection body is empty: no file is written, no .last-output sidecar is written (line ~497), and exit code is 1. The sibling render --selection path check is at render.zig:789 and uses the message tmux-2html render: selection is empty — mirror this with a region prefix and break :confirm_render 1.\n2. INPUT: html: []u8 — the full HTML document returned by renderSelectionHtml(allocator, &ctx, font, title, lang) at region.zig:471. Also stderr writer (already declared in body() scope) and render.selectionBodyEmpty made pub by P1.M1.T1.S1.\n3. LOGIC: Immediately after defer allocator.free(html); (region.zig:475), insert a guard block: check render.selectionBodyEmpty(html); if true, write the message 'tmux-2html region: selection is empty' followed by newline to stderr, then break :confirm_render with value 1. This break must fire BEFORE writeHtmlAtomic (line 487) and writeLastOutput (line 497) so neither the HTML file nor the sidecar is produced. Also UPDATE the comment at region.zig:442 that says // Empty == no selection begun (sel inactive) — correct it to explain that the inactive check is the FIRST guard (no selection started at all) and the NEW check after render catches an active selection over blank cells. The two-tier guard: tier 1 = no selection begun (existing), tier 2 = selection over blank cells (new).\n   No mock needed — this is pure control-flow logic using an existing helper.\n4. OUTPUT: On empty/blank-cell confirm, region prints a warning to stderr, writes nothing to disk or sidecar, and exits 1. On non-empty confirm, behavior is unchanged (file written, sidecar written, exit 0).\n5. DOCS: Mode A — Update the inline comment at src/region.zig:442 to correct the PRD 13 misreading (empty means renders zero non-blank cells, not just inactive selection). Document the two-tier guard. No external doc files change for this subtask."
+                  "dependencies": [
+                    "P1.M1.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md. The .confirm arm in src/region.zig (labeled confirm_render:) currently guards only on !ctx.sel.active() (line ~445). After that guard passes, it renders via renderSelectionHtml (line ~471) which returns a FULL 8.1-spec HTML document (envelope already wrapped by render.writeDocumentBytes). The check must be inserted AFTER defer allocator.free(html); (line ~475) and BEFORE resolveOutputPath/makePath/writeHtmlAtomic (lines ~479-487), so that when the selection body is empty: no file is written, no .last-output sidecar is written (line ~497), and exit code is 1. The sibling render --selection path check is at render.zig:789 and uses the message tmux-2html render: selection is empty — mirror this with a region prefix and break :confirm_render 1.\n2. INPUT: html: []u8 — the full HTML document returned by renderSelectionHtml(allocator, &ctx, font, title, lang) at region.zig:471. Also stderr writer (already declared in body() scope) and render.selectionBodyEmpty made pub by P1.M1.T1.S1.\n3. LOGIC: Immediately after defer allocator.free(html); (region.zig:475), insert a guard block: check render.selectionBodyEmpty(html); if true, write the message 'tmux-2html region: selection is empty' followed by newline to stderr, then break :confirm_render with value 1. This break must fire BEFORE writeHtmlAtomic (line 487) and writeLastOutput (line 497) so neither the HTML file nor the sidecar is produced. Also UPDATE the comment at region.zig:442 that says // Empty == no selection begun (sel inactive) — correct it to explain that the inactive check is the FIRST guard (no selection started at all) and the NEW check after render catches an active selection over blank cells. The two-tier guard: tier 1 = no selection begun (existing), tier 2 = selection over blank cells (new).\n   No mock needed — this is pure control-flow logic using an existing helper.\n4. OUTPUT: On empty/blank-cell confirm, region prints a warning to stderr, writes nothing to disk or sidecar, and exits 1. On non-empty confirm, behavior is unchanged (file written, sidecar written, exit 0).\n5. DOCS: Mode A — Update the inline comment at src/region.zig:442 to correct the PRD 13 misreading (empty means renders zero non-blank cells, not just inactive selection). Document the two-tier guard. No external doc files change for this subtask.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.0",
+                    "h3.2"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -47,9 +60,18 @@
                   "title": "Add region integration test for blank-cell confirm (pty-driven)",
                   "status": "Planned",
                   "story_points": 2,
-                  "dependencies": ["P1.M1.T1.S2"],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.0", "h3.2", "h2.4"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md Step 3 section. region/renderSelectionHtml CANNOT be unit-tested (requires ghostty-vt Terminal + cross-test GOTCHA). The test MUST use the python3 pty drive pattern from tests/envelope_smoke.sh REGION block. That pattern: pty.fork() then child execvpe the real binary, parent writes b'v' (begin selection) then b'\\r' (confirm), polls fd + waitpid until child exits. The existing region test in envelope_smoke.sh drives confirm from the TOP of scrollback (non-blank rows) — this new test must drive it from a BLANK row.\n2. INPUT: The built binary at ./zig-out/bin/tmux-2html (must be built with --release=fast). The pty drive pattern from tests/envelope_smoke.sh lines ~104-131 (python3 inline heredoc).\n3. LOGIC: Add a new test case in tests/envelope_smoke.sh (or a dedicated tests/region_empty_confirm.sh) that:\n   (a) Creates an ISOLATED tmux server with a uniquely named socket (e.g. SOCK=t2h-empty-$$ then tmux -L $SOCK new-session -d -s s -x 20 -y 6).\n   (b) Seeds content and leaves a blank row: send 'echo realcontent' plus Enter, sleep for the shell to render. The cursor ends on the NEXT (blank) line.\n   (c) Drives region via pty: child execs tmux-2html region --target $PANE --output /path/to/blank.html with TMUX env pointing at the isolated socket. Parent sleeps 0.8s, writes b'v' (begin linewise selection on the blank row), sleeps 0.2s, writes b'\\r' (confirm).\n   (d) After child exits, ASSERT: exit code is 1 (non-zero), the output file does NOT exist, and the .last-output sidecar does NOT exist or does NOT reference the output file. These assertions cover Issue 1 (empty body not written) AND Issue 3 (no stale sidecar residue).\n   (e) SKIP cleanly (exit 0) if python3 or tmux is absent (follow the existing SKIP pattern in envelope_smoke.sh).\n   (f) Tear down ONLY the named session on the isolated socket (tmux -L $SOCK kill-session -t s) — NEVER kill-server, killall, or pkill (PRD 0, AGENTS.md 1).\n4. OUTPUT: A shell test that fails if region confirm over blank cells writes a file or exits 0, and passes if it warns + exits 1 + writes nothing. The test runs in CI alongside envelope_smoke.sh.\n5. MOCKING: No mocking needed — uses the real binary and a real (isolated) tmux server. The pty drive IS the test harness.\n6. DOCS: none — test addition only, no user-facing surface change."
+                  "dependencies": [
+                    "P1.M1.T1.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue1_region_empty_confirm.md Step 3 section. region/renderSelectionHtml CANNOT be unit-tested (requires ghostty-vt Terminal + cross-test GOTCHA). The test MUST use the python3 pty drive pattern from tests/envelope_smoke.sh REGION block. That pattern: pty.fork() then child execvpe the real binary, parent writes b'v' (begin selection) then b'\\r' (confirm), polls fd + waitpid until child exits. The existing region test in envelope_smoke.sh drives confirm from the TOP of scrollback (non-blank rows) — this new test must drive it from a BLANK row.\n2. INPUT: The built binary at ./zig-out/bin/tmux-2html (must be built with --release=fast). The pty drive pattern from tests/envelope_smoke.sh lines ~104-131 (python3 inline heredoc).\n3. LOGIC: Add a new test case in tests/envelope_smoke.sh (or a dedicated tests/region_empty_confirm.sh) that:\n   (a) Creates an ISOLATED tmux server with a uniquely named socket (e.g. SOCK=t2h-empty-$$ then tmux -L $SOCK new-session -d -s s -x 20 -y 6).\n   (b) Seeds content and leaves a blank row: send 'echo realcontent' plus Enter, sleep for the shell to render. The cursor ends on the NEXT (blank) line.\n   (c) Drives region via pty: child execs tmux-2html region --target $PANE --output /path/to/blank.html with TMUX env pointing at the isolated socket. Parent sleeps 0.8s, writes b'v' (begin linewise selection on the blank row), sleeps 0.2s, writes b'\\r' (confirm).\n   (d) After child exits, ASSERT: exit code is 1 (non-zero), the output file does NOT exist, and the .last-output sidecar does NOT exist or does NOT reference the output file. These assertions cover Issue 1 (empty body not written) AND Issue 3 (no stale sidecar residue).\n   (e) SKIP cleanly (exit 0) if python3 or tmux is absent (follow the existing SKIP pattern in envelope_smoke.sh).\n   (f) Tear down ONLY the named session on the isolated socket (tmux -L $SOCK kill-session -t s) — NEVER kill-server, killall, or pkill (PRD 0, AGENTS.md 1).\n4. OUTPUT: A shell test that fails if region confirm over blank cells writes a file or exits 0, and passes if it warns + exits 1 + writes nothing. The test runs in CI alongside envelope_smoke.sh.\n5. MOCKING: No mocking needed — uses the real binary and a real (isolated) tmux server. The pty drive IS the test harness.\n6. DOCS: none — test addition only, no user-facing surface change.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.0",
+                    "h3.2",
+                    "h2.4"
+                  ]
                 }
               ]
             },
@@ -67,8 +89,13 @@
                   "status": "Planned",
                   "story_points": 0.5,
                   "dependencies": [],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.1"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md. The function determineCols at src/render.zig:95-100 has: if (opts_cols) |c| return c; — it returns the explicit --cols value with NO lower-bound check. The tty-derived branch (getSize at render.zig:81) ALREADY rejects zero (if ws.col == 0 or ws.row == 0 then return error.InvalidWindowSize), but the CLI value bypasses it. SizeError.InvalidWindowSize already exists (render.zig:45) and is already mapped to exit 2 + stderr message by reportSizeError (render.zig:715-723) and run() catch (render.zig:751-754). No new error-reporting code is needed.\n2. INPUT: The function pub fn determineCols(opts_cols: ?u16, has_tty: bool) SizeError!u16 at src/render.zig:95.\n3. LOGIC: Change the first arm from a bare return to a validated return. If c < 1, return error.InvalidWindowSize (which triggers the existing exit-2 path). Otherwise return c. This makes --cols 0 produce exit 2 (not exit 139 segfault) via the existing run() catch, reportSizeError, stderr message, return 2 plumbing. Do NOT change the tty branch or the SizeRequired branch.\n4. OUTPUT: determineCols(0, false) returns error.InvalidWindowSize. determineCols(1, false) and determineCols(80, false) still return 1 and 80 respectively. The function signature is unchanged.\n5. DOCS: none — the error message is already defined in reportSizeError; no new user-facing message is added."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md. The function determineCols at src/render.zig:95-100 has: if (opts_cols) |c| return c; — it returns the explicit --cols value with NO lower-bound check. The tty-derived branch (getSize at render.zig:81) ALREADY rejects zero (if ws.col == 0 or ws.row == 0 then return error.InvalidWindowSize), but the CLI value bypasses it. SizeError.InvalidWindowSize already exists (render.zig:45) and is already mapped to exit 2 + stderr message by reportSizeError (render.zig:715-723) and run() catch (render.zig:751-754). No new error-reporting code is needed.\n2. INPUT: The function pub fn determineCols(opts_cols: ?u16, has_tty: bool) SizeError!u16 at src/render.zig:95.\n3. LOGIC: Change the first arm from a bare return to a validated return. If c < 1, return error.InvalidWindowSize (which triggers the existing exit-2 path). Otherwise return c. This makes --cols 0 produce exit 2 (not exit 139 segfault) via the existing run() catch, reportSizeError, stderr message, return 2 plumbing. Do NOT change the tty branch or the SizeRequired branch.\n4. OUTPUT: determineCols(0, false) returns error.InvalidWindowSize. determineCols(1, false) and determineCols(80, false) still return 1 and 80 respectively. The function signature is unchanged.\n5. DOCS: none — the error message is already defined in reportSizeError; no new user-facing message is added.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.1"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -77,8 +104,13 @@
                   "status": "Planned",
                   "story_points": 0.5,
                   "dependencies": [],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.1"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md. In render.run() at src/render.zig:756, the line is: const rows = opts.rows orelse lineCount(ansi); — when --rows is explicitly 0, opts.rows is 0 (not null), so orelse does NOT fire, and rows = 0 reaches Size then Terminal.init then segfault. The default path (no --rows) is safe because lineCount floors at >= 1 (render.zig:106,109). The fix must be at the run() level because rows is computed inline, not through determineCols.\n2. INPUT: The rows variable at src/render.zig:756 (type u16). The reportSizeError function at render.zig:715.\n3. LOGIC: After line 756 (the rows computation), add: if rows < 1, call reportSizeError(error.InvalidWindowSize) then return 2. Then the existing Size construction at line 757 proceeds with guaranteed >= 1 dimensions.\n4. OUTPUT: render --rows 0 exits 2 with stderr message instead of segfault. render --rows 1 and omitted --rows behave unchanged.\n5. DOCS: none — reuses existing error message; no new user-facing surface."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md. In render.run() at src/render.zig:756, the line is: const rows = opts.rows orelse lineCount(ansi); — when --rows is explicitly 0, opts.rows is 0 (not null), so orelse does NOT fire, and rows = 0 reaches Size then Terminal.init then segfault. The default path (no --rows) is safe because lineCount floors at >= 1 (render.zig:106,109). The fix must be at the run() level because rows is computed inline, not through determineCols.\n2. INPUT: The rows variable at src/render.zig:756 (type u16). The reportSizeError function at render.zig:715.\n3. LOGIC: After line 756 (the rows computation), add: if rows < 1, call reportSizeError(error.InvalidWindowSize) then return 2. Then the existing Size construction at line 757 proceeds with guaranteed >= 1 dimensions.\n4. OUTPUT: render --rows 0 exits 2 with stderr message instead of segfault. render --rows 1 and omitted --rows behave unchanged.\n5. DOCS: none — reuses existing error message; no new user-facing surface.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.1"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -87,8 +119,13 @@
                   "status": "Planned",
                   "story_points": 1,
                   "dependencies": [],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.1"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md Fix Site 3 section. region.zig builds its Terminal DIRECTLY at line 326 (NOT via renderGrid), so the render.zig guards do not cover it. cap.cols and cap.rows come from capture.geometry() which parses tmux display-message output — for real panes these are always >= 1, but a degenerate or resized pane could theoretically yield 0. The existing pane guard at main.zig:500-506 (keyed on result.code != 0) shows the correct pattern. The comment there explicitly documents the ghostty-vt zero-dimension segfault.\n2. INPUT: cap.cols (u16) and cap.rows (u16) from the capture.Captured struct, available in regionHandle at src/region.zig before line 326.\n3. LOGIC: Before the Terminal.init call at region.zig:326, add a guard: if cap.cols < 1 or cap.rows < 1, write a message to stderr (e.g. tmux-2html region: capture has zero-dimension pane geometry) and return 2 (capture error per PRD 5). Obtain stderr via std.fs.File.stderr() if not already in scope at that point in the code. This mirrors main.zig:500-506 rationale.\n4. OUTPUT: A zero-dimension capture (cols=0 or rows=0) in region exits 2 with a stderr message instead of segfaulting.\n5. DOCS: none — defensive internal guard; for normal pane geometries there is no user-facing behavior change."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md Fix Site 3 section. region.zig builds its Terminal DIRECTLY at line 326 (NOT via renderGrid), so the render.zig guards do not cover it. cap.cols and cap.rows come from capture.geometry() which parses tmux display-message output — for real panes these are always >= 1, but a degenerate or resized pane could theoretically yield 0. The existing pane guard at main.zig:500-506 (keyed on result.code != 0) shows the correct pattern. The comment there explicitly documents the ghostty-vt zero-dimension segfault.\n2. INPUT: cap.cols (u16) and cap.rows (u16) from the capture.Captured struct, available in regionHandle at src/region.zig before line 326.\n3. LOGIC: Before the Terminal.init call at region.zig:326, add a guard: if cap.cols < 1 or cap.rows < 1, write a message to stderr (e.g. tmux-2html region: capture has zero-dimension pane geometry) and return 2 (capture error per PRD 5). Obtain stderr via std.fs.File.stderr() if not already in scope at that point in the code. This mirrors main.zig:500-506 rationale.\n4. OUTPUT: A zero-dimension capture (cols=0 or rows=0) in region exits 2 with a stderr message instead of segfaulting.\n5. DOCS: none — defensive internal guard; for normal pane geometries there is no user-facing behavior change.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.1"
+                  ]
                 },
                 {
                   "type": "Subtask",
@@ -96,9 +133,18 @@
                   "title": "Add unit and integration tests for zero-dimension rejection",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T2.S1", "P1.M1.T2.S2"],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.2", "h3.1", "h2.4"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md Tests section. The existing determineCols unit test at render.zig:1239 asserts determineCols(1, false) == 1 but never tests 0. No render test exercises --cols 0 or --rows 0. Do NOT add a renderGrid with cols=0 test — that path must remain unreachable by construction (it would segfault the test binary).\n2. INPUT: The modified determineCols (P1.M1.T2.S1) and render.run() (P1.M1.T2.S2).\n3. LOGIC: Add the following tests:\n   (a) UNIT TEST in src/render.zig — add a new test fn near the existing determineCols test (render.zig:1239) that asserts determineCols(0, false) returns error.InvalidWindowSize and determineCols(0, true) also returns error.InvalidWindowSize (explicit 0 wins over tty). This is a pure logic test (no Terminal involved).\n   (b) INTEGRATION TEST — add shell assertions to tests/envelope_smoke.sh (or a dedicated render test): pipe 'x' into the binary with --cols 0 and assert exit code is non-zero AND not 139 (SIGSEGV). Repeat for --cols 5 --rows 0. Assert nothing is written to stdout.\n4. OUTPUT: Unit test confirms determineCols rejects 0. Shell test confirms the binary exits gracefully (not 139) on --cols 0 and --rows 0.\n5. MOCKING: Unit test is pure (no Terminal). Shell test uses the real binary. No mocks needed.\n6. DOCS: none — test addition only."
+                  "dependencies": [
+                    "P1.M1.T2.S1",
+                    "P1.M1.T2.S2"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue2_zero_dimension_segfault.md Tests section. The existing determineCols unit test at render.zig:1239 asserts determineCols(1, false) == 1 but never tests 0. No render test exercises --cols 0 or --rows 0. Do NOT add a renderGrid with cols=0 test — that path must remain unreachable by construction (it would segfault the test binary).\n2. INPUT: The modified determineCols (P1.M1.T2.S1) and render.run() (P1.M1.T2.S2).\n3. LOGIC: Add the following tests:\n   (a) UNIT TEST in src/render.zig — add a new test fn near the existing determineCols test (render.zig:1239) that asserts determineCols(0, false) returns error.InvalidWindowSize and determineCols(0, true) also returns error.InvalidWindowSize (explicit 0 wins over tty). This is a pure logic test (no Terminal involved).\n   (b) INTEGRATION TEST — add shell assertions to tests/envelope_smoke.sh (or a dedicated render test): pipe 'x' into the binary with --cols 0 and assert exit code is non-zero AND not 139 (SIGSEGV). Repeat for --cols 5 --rows 0. Assert nothing is written to stdout.\n4. OUTPUT: Unit test confirms determineCols rejects 0. Shell test confirms the binary exits gracefully (not 139) on --cols 0 and --rows 0.\n5. MOCKING: Unit test is pure (no Terminal). Shell test uses the real binary. No mocks needed.\n6. DOCS: none — test addition only.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.2",
+                    "h3.1",
+                    "h2.4"
+                  ]
                 }
               ]
             }
@@ -125,8 +171,12 @@
                   "status": "Planned",
                   "story_points": 1,
                   "dependencies": [],
-                  "prd_selectors": ["h1.0", "h2.3", "h3.3"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue4_check_safety_noise.md. scripts/check-safety.sh scans all text files under 2M (excluding .git, .zig-cache, zig-pkg, zig-out, .pi-subagents, node_modules, scratch). plan/ is NOT excluded. The WARN-scan condition near the bottom of the main scan loop is: if not under_scripts, then run shim_combo and WARN scan_pat. The function under_scripts() checks if a path starts with ROOT/scripts/. FAIL patterns (R1_KILL, kill-server, R2 recursive exec) run for ALL files unconditionally — they must continue to scan plan/. Only WARN patterns need the plan/ exclusion.\n2. INPUT: scripts/check-safety.sh (the full script). The functions under_scripts() and the main scan loop.\n3. LOGIC: Add a helper function under_plan() near under_scripts() that checks if a path starts with ROOT/plan/. Then change the WARN condition from: if not under_scripts then ... to: if not under_scripts AND not under_plan then ... This keeps FAIL scanning in plan/ (the FAIL scan_pat calls are above this conditional and run unconditionally) while suppressing WARN noise from plan/ documentation. Verify after the change: running scripts/check-safety.sh should report 0 WARNs (was 16) and 0 FAILs.\n4. OUTPUT: check-safety.sh reports 0 WARNs from plan/ files. FAIL scanning remains active everywhere. Exit code is 0 (no FAILs).\n5. DOCS: Mode A — Update the header comment in scripts/check-safety.sh (lines 10-14, the WARN section) to document that WARN patterns are suppressed in scripts/ AND plan/ (documented test-harness recipes), while FAIL patterns scan the entire repo. Add a one-line comment near under_plan() explaining the rationale."
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: See plan/004_92f7aeb62a3a/bugfix/001_678d4c980a19/architecture/issue4_check_safety_noise.md. scripts/check-safety.sh scans all text files under 2M (excluding .git, .zig-cache, zig-pkg, zig-out, .pi-subagents, node_modules, scratch). plan/ is NOT excluded. The WARN-scan condition near the bottom of the main scan loop is: if not under_scripts, then run shim_combo and WARN scan_pat. The function under_scripts() checks if a path starts with ROOT/scripts/. FAIL patterns (R1_KILL, kill-server, R2 recursive exec) run for ALL files unconditionally — they must continue to scan plan/. Only WARN patterns need the plan/ exclusion.\n2. INPUT: scripts/check-safety.sh (the full script). The functions under_scripts() and the main scan loop.\n3. LOGIC: Add a helper function under_plan() near under_scripts() that checks if a path starts with ROOT/plan/. Then change the WARN condition from: if not under_scripts then ... to: if not under_scripts AND not under_plan then ... This keeps FAIL scanning in plan/ (the FAIL scan_pat calls are above this conditional and run unconditionally) while suppressing WARN noise from plan/ documentation. Verify after the change: running scripts/check-safety.sh should report 0 WARNs (was 16) and 0 FAILs.\n4. OUTPUT: check-safety.sh reports 0 WARNs from plan/ files. FAIL scanning remains active everywhere. Exit code is 0 (no FAILs).\n5. DOCS: Mode A — Update the header comment in scripts/check-safety.sh (lines 10-14, the WARN section) to document that WARN patterns are suppressed in scripts/ AND plan/ (documented test-harness recipes), while FAIL patterns scan the entire repo. Add a one-line comment near under_plan() explaining the rationale.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.3",
+                    "h3.3"
+                  ]
                 }
               ]
             }
@@ -152,9 +202,21 @@
                   "title": "Update README.md and overview docs to reflect bug fixes",
                   "status": "Planned",
                   "story_points": 1,
-                  "dependencies": ["P1.M1.T1.S2", "P1.M1.T1.S3", "P1.M1.T2.S1", "P1.M1.T2.S2", "P1.M1.T2.S3", "P1.M1.T2.S4", "P1.M2.T1.S1"],
-                  "prd_selectors": ["h1.0", "h2.0", "h2.4"],
-                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: This is the SOW Mode B final sweep. The implementing subtasks (P1.M1.T1.S2, P1.M1.T2.S1-S3, P1.M2.T1.S1) already update the inline comments, help text, and script headers they directly touch (Mode A). This subtask covers cross-cutting docs: README.md feature blurbs, docs/ overview sections, and any changelog/known-issues list that summarizes the whole delta.\n2. INPUT: All completed fixes from P1.M1 and P1.M2. The current README.md and docs/ content.\n3. LOGIC: Review README.md, docs/*.md, and AGENTS.md for any references to region confirm behavior, --cols/--rows constraints, or check-safety scoping. If any of these docs describe the OLD behavior (e.g. region confirm always writes a file, or any u16 accepted for --cols, or check-safety scanning plan/), update them. If the README has a Known Issues or Changelog section, add entries for the two Major fixes and the Minor fix. If no such section exists, no structural change is needed — the fixes are robustness improvements to existing features, not new capabilities.\n4. OUTPUT: README.md and docs/ accurately describe the post-fix behavior. No stale documentation referencing pre-fix behavior.\n5. DOCS: Mode B — THIS IS the documentation sync task. It depends on every implementing subtask to ensure the whole changeset is coherent before sweeping docs."
+                  "dependencies": [
+                    "P1.M1.T1.S2",
+                    "P1.M1.T1.S3",
+                    "P1.M1.T2.S1",
+                    "P1.M1.T2.S2",
+                    "P1.M1.T2.S3",
+                    "P1.M1.T2.S4",
+                    "P1.M2.T1.S1"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: This is the SOW Mode B final sweep. The implementing subtasks (P1.M1.T1.S2, P1.M1.T2.S1-S3, P1.M2.T1.S1) already update the inline comments, help text, and script headers they directly touch (Mode A). This subtask covers cross-cutting docs: README.md feature blurbs, docs/ overview sections, and any changelog/known-issues list that summarizes the whole delta.\n2. INPUT: All completed fixes from P1.M1 and P1.M2. The current README.md and docs/ content.\n3. LOGIC: Review README.md, docs/*.md, and AGENTS.md for any references to region confirm behavior, --cols/--rows constraints, or check-safety scoping. If any of these docs describe the OLD behavior (e.g. region confirm always writes a file, or any u16 accepted for --cols, or check-safety scanning plan/), update them. If the README has a Known Issues or Changelog section, add entries for the two Major fixes and the Minor fix. If no such section exists, no structural change is needed — the fixes are robustness improvements to existing features, not new capabilities.\n4. OUTPUT: README.md and docs/ accurately describe the post-fix behavior. No stale documentation referencing pre-fix behavior.\n5. DOCS: Mode B — THIS IS the documentation sync task. It depends on every implementing subtask to ensure the whole changeset is coherent before sweeping docs.",
+                  "prd_selectors": [
+                    "h1.0",
+                    "h2.0",
+                    "h2.4"
+                  ]
                 }
               ]
             }

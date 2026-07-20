@@ -606,7 +606,7 @@ pub fn renderToFileAtomic(
 ///
 /// Malformed HTML (no `<pre` / no `>` / no `</pre>`) is treated as NON-empty (returns false) —
 /// we never false-positive a real selection into an "empty" failure.
-fn selectionBodyEmpty(html: []const u8) bool {
+pub fn selectionBodyEmpty(html: []const u8) bool {
     const pre = std.mem.indexOf(u8, html, "<pre") orelse return false;
     const open_end = std.mem.indexOfScalarPos(u8, html, pre, '>') orelse return false;
     const close = std.mem.indexOfPos(u8, html, open_end + 1, "</pre>") orelse return false;
