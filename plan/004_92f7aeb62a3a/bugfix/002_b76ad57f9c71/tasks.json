@@ -81,7 +81,7 @@
               "type": "Task",
               "id": "P1.M2.T1",
               "title": "Pure mouse→grid coordinate + state-machine core (no I/O)",
-              "status": "Researching",
+              "status": "Complete",
               "description": "Two pure, unit-testable functions in region.zig: mouseCell (1-based SGR cell → 0-based grid cell, honoring viewport scroll + excluding the status-line row) and applyMouse (the press/motion/release/wheel state machine mutating cursor+sel+mouse_anchor). Plus clampCursorIntoViewport. All operate on stack value structs / explicit pointers — NO Terminal construction ⇒ safe as separate test fns.",
               "subtasks": [
                 {
@@ -103,7 +103,7 @@
                   "type": "Subtask",
                   "id": "P1.M2.T1.S2",
                   "title": "Add pure applyMouse() state machine + clampCursorIntoViewport() + unit tests",
-                  "status": "Researching",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1"
@@ -122,14 +122,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Wire the .mouse arm into regionHandle + add RegionCtx.mouse_anchor",
-              "status": "Planned",
+              "status": "Researching",
               "description": "Connect the pure mouse logic to the live event loop: add a `mouse_anchor: ?view.Pos` field to RegionCtx and a `.mouse` arm to regionHandle (before the input.feed call, since feed returns null for mouse) that calls applyMouse + repaint. Update the stale doc-comment that called mouse a NO-OP follow-up.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "Add RegionCtx.mouse_anchor field + .mouse arm in regionHandle + doc-comment update",
-                  "status": "Planned",
+                  "status": "Researching",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1",

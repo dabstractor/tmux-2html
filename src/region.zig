@@ -131,6 +131,93 @@ fn mouseCell(sx: u32, sy: u32, scroll: u32, grid_rows: u16, total_rows: u32, tty
     return .{ .x = gx, .y = gy };
 }
 
+// ---- applyMouse (S2) + clampCursorIntoViewport (S2) — PURE mouse state machine (PRD §7.6) ----------
+// Consumed by the .mouse arm in regionHandle (P1.M2.T2.S1). Pure: explicit pointers, NO I/O,
+// NO Terminal/Screen => unit-testable with stack cursor/sel/anchor. tmux copy-mode-mouse parity.
+
+/// PURE: after a viewport scroll (wheel), clamp cursor.pos.y into the visible window
+/// [scroll, min(total-1, scroll+grid_rows-1)] (saturating) and sync sel.cursor. Mirrors
+/// motion.zig's page_up/page_down/half_page_* cursor clamping. grid_rows = visible grid rows
+/// (= tty_rows-1 in the real wiring). No I/O, no Terminal.
+fn clampCursorIntoViewport(cursor: *motion.Cursor, sel: *select.Sel, total_rows: u32, grid_rows: u16) void {
+    const lo: u32 = cursor.viewport.scroll;
+    const last: u32 = if (total_rows >= 1) total_rows - 1 else 0;
+    const hi: u32 = @min(last, cursor.viewport.scroll +| (@as(u32, grid_rows) -| 1));
+    if (cursor.pos.y < lo) cursor.pos.y = lo;
+    if (cursor.pos.y > hi) cursor.pos.y = hi;
+    sel.cursor = cursor.pos;
+}
+
+/// PURE mouse state machine — PRD §7.6 / tmux copy-mode-mouse parity. Mutates cursor / sel /
+/// mouse_anchor via explicit pointers (testable WITHOUT a RegionCtx/Screen/Terminal). `cell` is the
+/// 0-based grid cell from mouseCell (S1). grid_rows/total_rows/tty_cols come from RegionCtx in the
+/// real wiring (P1.M2.T2.S1).
+///
+///   press    — move cursor to cell + scrollForCursor; sel.clear() (a fresh click discards any prior
+///               selection); sel.cursor = cursor.pos; mouse_anchor = cell (remember press start).
+///   motion   — drag if mouse_anchor is set: want_mode = m.alt ? .block : .linewise (§7.6 "block with
+///               Alt"); begin(at the press anchor) if the sel is inactive, else switch the mode live if
+///               it differs (mid-drag Alt toggle); move cursor + extend sel.cursor. else (a hover with
+///               no prior press): just move cursor + scrollForCursor.
+///   release  — if mouse_anchor is set: move cursor + sync sel.cursor; clear mouse_anchor; if the
+///               selection collapsed to one cell (anchor == cursor => a click, no drag) sel.clear(),
+///               so a plain click leaves NO selection (Enter after a click => "no selection").
+///   wheel_*  — halfPageUp / halfPageDown; then clampCursorIntoViewport (keep the cursor visible).
+fn applyMouse(
+    cursor: *motion.Cursor,
+    sel: *select.Sel,
+    mouse_anchor: *?view.Pos,
+    m: app.MouseEvent,
+    grid_rows: u16,
+    total_rows: u32,
+    tty_cols: u16,
+) void {
+    const cell: view.Pos = mouseCell(m.x, m.y, cursor.viewport.scroll, grid_rows, total_rows, tty_cols);
+    switch (m.action) {
+        .press => {
+            cursor.pos = cell;
+            cursor.viewport.scroll = view.scrollForCursor(cell.y, cursor.viewport, total_rows);
+            sel.clear();
+            sel.cursor = cursor.pos;
+            mouse_anchor.* = cell;
+        },
+        .motion => {
+            if (mouse_anchor.*) |anchor| {
+                const want_mode: select.Mode = if (m.alt) .block else .linewise;
+                if (!sel.active()) {
+                    sel.begin(anchor, want_mode);
+                } else if (sel.mode != want_mode) {
+                    sel.mode = want_mode;
+                }
+                cursor.pos = cell;
+                cursor.viewport.scroll = view.scrollForCursor(cell.y, cursor.viewport, total_rows);
+                sel.cursor = cursor.pos;
+            } else {
+                cursor.pos = cell;
+                cursor.viewport.scroll = view.scrollForCursor(cell.y, cursor.viewport, total_rows);
+            }
+        },
+        .release => {
+            if (mouse_anchor.*) |_| {
+                cursor.pos = cell;
+                cursor.viewport.scroll = view.scrollForCursor(cell.y, cursor.viewport, total_rows);
+                sel.cursor = cursor.pos;
+                mouse_anchor.* = null;
+                // A click with no drag (selection collapsed to one cell) leaves no selection.
+                if (sel.active() and std.meta.eql(sel.anchor, cursor.pos)) sel.clear();
+            }
+        },
+        .wheel_up => {
+            cursor.viewport.scroll = view.halfPageUp(cursor.viewport.scroll, total_rows, grid_rows);
+            clampCursorIntoViewport(cursor, sel, total_rows, grid_rows);
+        },
+        .wheel_down => {
+            cursor.viewport.scroll = view.halfPageDown(cursor.viewport.scroll, total_rows, grid_rows);
+            clampCursorIntoViewport(cursor, sel, total_rows, grid_rows);
+        },
+    }
+}
+
 // ============================================================================
 // regionHandle - the app.EventHandler callback (decode -> motion/select/search)
 // ============================================================================
@@ -1201,5 +1288,111 @@ test "mouseCell: degenerate grid_rows==0 / tty_cols==0 / total_rows==0 do NOT un
     try std.testing.expectEqual(@as(u32, 0), a.y); // vy=min(2, 0)=0; gy=min(0, 49)=0
     const b = mouseCell(5, 3, 0, 10, 0, 80); // total_rows=0
     try std.testing.expectEqual(@as(u32, 0), b.y); // gy = min(scroll+vy, 0) = 0
+}
+
+// ---- applyMouse / clampCursorIntoViewport tests (stack cursor/sel/anchor; NO Terminal ⇒ safe) ----
+
+test "applyMouse: press moves cursor, clears any prior selection, sets mouse_anchor" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 9 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{ .anchor = .{ .x = 1, .y = 1 }, .cursor = .{ .x = 2, .y = 2 }, .mode = .linewise };
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 5, .y = 3, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(view.Pos{ .x = 4, .y = 2 }, cursor.pos); // mouseCell(5,3,0)
+    try std.testing.expect(!sel.active()); // prior selection cleared
+    try std.testing.expectEqual(view.Pos{ .x = 4, .y = 2 }, sel.cursor);
+    try std.testing.expectEqual(@as(?view.Pos, .{ .x = 4, .y = 2 }), anchor); // anchor = press cell
+}
+
+test "applyMouse: drag (motion after press) begins linewise at anchor; extent anchor..cursor" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 3, .y = 2, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .motion, .x = 8, .y = 6, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(select.Mode.linewise, sel.mode);
+    try std.testing.expect(sel.active());
+    try std.testing.expectEqual(view.Pos{ .x = 2, .y = 1 }, sel.anchor); // press cell mouseCell(3,2,0)
+    try std.testing.expectEqual(view.Pos{ .x = 7, .y = 5 }, sel.cursor); // drag cell mouseCell(8,6,0)
+    const ext = sel.extent(80).?;
+    try std.testing.expectEqual(@as(u32, 1), ext.y1); // min(1,5)
+    try std.testing.expectEqual(@as(u32, 5), ext.y2); // max(1,5)
+    try std.testing.expectEqual(false, ext.rect);
+}
+
+test "applyMouse: drag with alt => block selection (rect)" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 3, .y = 2, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .motion, .x = 8, .y = 6, .shift = false, .alt = true, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(select.Mode.block, sel.mode);
+    const ext = sel.extent(80).?;
+    try std.testing.expectEqual(true, ext.rect);
+    try std.testing.expectEqual(@as(u32, 2), ext.x1); // min(2,7)
+    try std.testing.expectEqual(@as(u32, 7), ext.x2); // max(2,7)
+}
+
+test "applyMouse: toggling alt mid-drag switches linewise<->block (anchor preserved)" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 3, .y = 2, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .motion, .x = 8, .y = 6, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(select.Mode.linewise, sel.mode);
+    // continue the drag WITH alt => switches to block
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .motion, .x = 9, .y = 7, .shift = false, .alt = true, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(select.Mode.block, sel.mode);
+    try std.testing.expectEqual(view.Pos{ .x = 2, .y = 1 }, sel.anchor); // anchor still the press cell
+}
+
+test "applyMouse: release after a drag keeps the selection (anchor..release-cell)" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 3, .y = 2, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .motion, .x = 8, .y = 6, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .release, .x = 9, .y = 7, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expect(sel.active()); // selection kept
+    try std.testing.expectEqual(view.Pos{ .x = 2, .y = 1 }, sel.anchor); // press cell
+    try std.testing.expectEqual(view.Pos{ .x = 8, .y = 6 }, sel.cursor); // release cell mouseCell(9,7,0)
+    try std.testing.expectEqual(@as(?view.Pos, null), anchor); // anchor cleared on release
+}
+
+test "applyMouse: a plain click (press then release, no drag) leaves NO selection" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .press, .x = 5, .y = 3, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    // release at the SAME cell (no motion in between) => a click, not a drag
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .left, .action = .release, .x = 5, .y = 3, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expect(!sel.active()); // no selection after a click
+    try std.testing.expectEqual(@as(?view.Pos, null), anchor);
+    try std.testing.expectEqual(view.Pos{ .x = 4, .y = 2 }, cursor.pos); // cursor did move to the cell
+}
+
+test "applyMouse: wheel_up/wheel_down scroll by half a page and clamp the cursor into view" {
+    // 50-row grid, 10-row viewport, scroll=20 (max scroll = 40), cursor at grid row 25 (in view).
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 25 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 20 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null;
+    // wheel_up: half=5; scroll=max(0,20-5)=15; clamp window [15, min(49,15+9)=24] => cursor 25->24.
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .none, .action = .wheel_up, .x = 1, .y = 1, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(@as(u32, 15), cursor.viewport.scroll);
+    try std.testing.expectEqual(@as(u32, 24), cursor.pos.y); // clamped into view
+    try std.testing.expectEqual(cursor.pos, sel.cursor); // clamp synced sel.cursor
+    // wheel_down: half=5; scroll=15+5=20; clamp window [20, min(49,20+9)=29] => cursor 24 stays.
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .none, .action = .wheel_down, .x = 1, .y = 1, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(@as(u32, 20), cursor.viewport.scroll);
+    try std.testing.expectEqual(@as(u32, 24), cursor.pos.y);
+}
+
+test "applyMouse: motion with no prior press (hover) just moves the cursor" {
+    var cursor = motion.Cursor{ .pos = .{ .x = 0, .y = 0 }, .viewport = .{ .cols = 80, .rows = 10, .scroll = 0 } };
+    var sel = select.Sel{};
+    var anchor: ?view.Pos = null; // no press => drag not active
+    applyMouse(&cursor, &sel, &anchor, .{ .button = .none, .action = .motion, .x = 6, .y = 4, .shift = false, .alt = false, .ctrl = false }, 10, 50, 80);
+    try std.testing.expectEqual(view.Pos{ .x = 5, .y = 3 }, cursor.pos); // mouseCell(6,4,0)
+    try std.testing.expect(!sel.active()); // a hover never begins a selection
+    try std.testing.expectEqual(@as(?view.Pos, null), anchor);
 }
 
