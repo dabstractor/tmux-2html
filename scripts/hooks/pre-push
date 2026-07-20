@@ -31,8 +31,6 @@
 
 set -uo pipefail
 
-ROOT="$(git rev-parse --show-toplevel)"
-
 # --- escape hatches ---------------------------------------------------------
 [ "${T2H_PREPUSH_SKIP:-0}" = "1" ] && { echo "pre-push: T2H_PREPUSH_SKIP=1 → skipping tests"; exit 0; }
 
@@ -84,6 +82,10 @@ if [ "$force_run" -eq 0 ]; then
 fi
 
 # --- run the same gate CI runs ----------------------------------------------
+# ROOT is resolved here (not earlier) so the skip paths above need no git and
+# stay clean in minimal environments. git invokes this hook from the repo root
+# anyway, so this just makes subdir invocations robust.
+ROOT="$(git rev-parse --show-toplevel)"
 # ZIG_HTTP_MAX_CONNS=1 mirrors ci.yml: caps the package manager's concurrent
 # HTTP fetches of ghostty + deps to avoid GitHub rate-limiting/connection
 # exhaustion on a cold cache.

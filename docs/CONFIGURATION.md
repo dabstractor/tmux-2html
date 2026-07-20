@@ -179,8 +179,10 @@ follows). `Esc` with no active selection also cancels and exits.
 
 **Confirm** — `Enter` (or `y`) renders the current selection to an HTML file,
 writes a `.last-output` sidecar next to the binary (so the plugin can flash the
-output path), honors `@tmux-2html-open`, and exits `0`. Confirming with **no**
-selection prints a warning and exits `1` with no file written.
+output path), honors `@tmux-2html-open`, and exits `0`. Confirming with **no
+selection, or a selection whose rendered body is empty (e.g. a selection
+covering only blank cells — a trailing blank line)** prints a warning, writes
+**no file and no `.last-output` sidecar**, and exits `1`.
 
 **Cancel** — `q`, `Ctrl-c`, or `Esc` with no selection exits `1` and produces no
 output. (An explicit `--output` overrides the default `<session>-<unixtime>-<pid>.html`
@@ -333,9 +335,11 @@ For the cache location and file format, see [Palette cache](#palette-cache).
   scrollback only** (`tmux capture-pane` without `-a`). The live alternate-screen
   UI is not captured. Alternate-screen capture is a future option, not currently
   shipped.
-- **Empty selection.** Confirming an empty selection warns and writes no file
-  (exit `1`). `render --selection` and `region` each guard this in their own way
-  (render checks the rendered body; region checks whether a selection was begun).
+- **Empty selection.** Confirming an empty selection — **no selection begun, or
+  an active selection whose rendered body is all blank cells** (e.g. a single
+  trailing blank line, or an empty rectangle) — warns, writes no file and no
+  `.last-output` sidecar, and exits `1`. Both `render --selection` and `region`
+  guard this by checking the rendered body, so the two paths agree.
 - **Wide characters, grapheme clusters, and emoji.** Cell widths come from the
   ghostty VT engine (via the vendored formatter). Selection rounds to cell
   boundaries, so a wide cell (e.g. 真, many emoji) is selected and emitted as a

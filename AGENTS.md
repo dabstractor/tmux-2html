@@ -64,7 +64,7 @@ These are mechanical — they don't rely on an agent reading or remembering rule
 
 | File | What it enforces | How |
 |---|---|---|
-| `scripts/check-safety.sh` | Static guard against §1 anti-patterns | `grep` rules; **FAIL** on global tmux kill + recursive bare-`exec tmux`; **WARN** on hand-rolled shim recipe (`PATH=…:$PATH` + append) outside `scripts/`. Exits non-zero on FAIL. |
+| `scripts/check-safety.sh` | Static guard against §1 anti-patterns | `grep` rules; **FAIL** on global tmux kill + recursive bare-`exec tmux`; **WARN** on hand-rolled shim recipe (`PATH=…:$PATH` + append) outside `scripts/` **and `plan/`**. FAIL rules scan repo-wide (including `plan/`) but `should_skip()` drops documentation (backticks, comments, and YAML/JSON `key: "value"` prose), so plan/ docs that merely quote the pattern names don't false-positive. Exits non-zero on FAIL. |
 | `scripts/safe-run.sh` | Resource caps | Runs a command under `ulimit -f` (max file size → stops 6 GB logs) + `ulimit -t` (max CPU s → stops infinite self-`exec` loops) + `ulimit -c 0`. Pure kernel enforcement. |
 | `scripts/with-tmux-audit.sh` | Approved tmux shim | Absolute `REAL_TMUX`, `T2H_AUDIT_ACTIVE` recursion guard, byte-capped `calls.log`, isolated `-L` socket, scoped `kill-session` teardown via `trap`. |
 | `scripts/preflight.sh` | Residue / runaway detection | Bounded (`-xdev`, size-capped) scan for `>100 MiB` files, `.audit*` dirs, `calls.log`, stray `tmp.*`; reports disk free. |
@@ -83,13 +83,25 @@ might run away — tests, audits, builds, generated-log producers — should run
 scripts/safe-run.sh --fsize 1024 --cpu 600 -- ./your-command
 ```
 
-## 4. Opt-in: wire the guard into your commits
+## 4. Opt-in: wire the guard into your commits / pushes
 
-`check-safety.sh` runs in CI regardless. To also gate local commits:
+`check-safety.sh` runs in CI regardless. To also gate local commits AND pushes:
 
 ```sh
 git config core.hooksPath scripts/hooks   # reversible: git config --unset core.hooksPath
 ```
+
+This activates BOTH hooks in `scripts/hooks/`:
+- **`pre-commit`** — runs `check-safety.sh` on staged text files (fast, §1 guard).
+- **`pre-push`** — runs `zig build test -Doptimize=ReleaseFast` (the exact gate
+  `ci.yml`'s `test` job runs) when the push touches compiled source (`.zig/.zon/.
+  h/.c/.cpp`); skips cleanly for docs/markdown/yaml-only pushes and when zig is
+  absent. It is slow (ReleaseFast build of ghostty + deps + 275 tests; ~seconds
+  warm, minutes cold). Skip once with `git push --no-verify` or
+  `T2H_PREPUSH_SKIP=1 git push`.
+
+Both hooks are ADVISORY (bypassable with `--no-verify`); CI remains the source of
+truth. They exist for fast local feedback before you burn a CI cycle.
 
 ## 5. If something is running away right now
 

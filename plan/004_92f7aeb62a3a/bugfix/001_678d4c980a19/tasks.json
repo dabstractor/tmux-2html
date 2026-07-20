@@ -4,7 +4,7 @@
       "type": "Phase",
       "id": "P1",
       "title": "Bug Fix Release — Region Empty-Confirm + Render Zero-Dimension Segfault + Safety Noise",
-      "status": "Ready",
+      "status": "Complete",
       "description": "Fix the two Major issues found during creative validation (Issue 1: region confirm writes an empty-body HTML file for blank-cell selection; Issue 2: render --cols 0 / --rows 0 segfaults) and the Minor check-safety.sh WARN noise (Issue 4). Issue 3 (stale .last-output sidecar) is resolved implicitly by the Issue 1 fix. All fixes reuse existing error infrastructure, helpers, and test patterns — no new dependencies.",
       "milestones": [
         {
@@ -186,21 +186,21 @@
           "type": "Milestone",
           "id": "P1.M3",
           "title": "Sync Changeset-Level Documentation",
-          "status": "Ready",
+          "status": "Complete",
           "description": "Per SOW Mode B: sweep README.md and any overview docs to reflect the bug fixes shipped in this changeset. This is the catch-all that prevents the README from shipping stale after the implementation subtasks complete.",
           "tasks": [
             {
               "type": "Task",
               "id": "P1.M3.T1",
               "title": "Sync changeset-level documentation",
-              "status": "Ready",
+              "status": "Complete",
               "description": "Review and update README.md, docs/, and any overview documentation to reflect the bug fixes in this changeset (empty-cell region confirm guard, zero-dimension render guard, check-safety plan/ scoping). Per SOW, implementing subtasks already update the docs they directly touch (Mode A); this task sweeps the cross-cutting/overview docs (Mode B).",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M3.T1.S1",
                   "title": "Update README.md and overview docs to reflect bug fixes",
-                  "status": "Ready",
+                  "status": "Complete",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S2",
