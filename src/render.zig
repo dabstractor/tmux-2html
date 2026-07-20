@@ -93,7 +93,10 @@ pub fn getSize() SizeError!WindowSize {
 /// GOTCHA: the `has_tty=true` branch calls the REAL getSize (opens /dev/tty) — never assert
 /// its value in a unit test (CI has no tty; only assert the explicit-cols + no-tty paths).
 pub fn determineCols(opts_cols: ?u16, has_tty: bool) SizeError!u16 {
-    if (opts_cols) |c| return c; // explicit --cols wins; never probes the tty
+    if (opts_cols) |c| { // explicit --cols wins; never probes the tty
+        if (c < 1) return error.InvalidWindowSize; // explicit --cols 0 -> exit 2 (Issue 2 segfault guard)
+        return c;
+    }
     if (has_tty) return (try getSize()).cols; // (try ...) — getSize is an error union
     return error.SizeRequired; // no tty, no --cols => exit 2
 }
@@ -1248,6 +1251,16 @@ test "determineCols: no tty + no cols => error.SizeRequired" {
     try std.testing.expectError(error.SizeRequired, determineCols(null, false));
     // NOTE: determineCols(null, true) calls the REAL getSize (opens /dev/tty) — never assert
     // its value in a unit test (CI has no controlling tty; that path is integration-tested).
+}
+
+test "determineCols: explicit --cols 0 is rejected (Issue 2: zero-dimension segfault guard)" {
+    // An explicit --cols 0 must NOT reach Terminal.init (ghostty-vt segfaults on a zero-width
+    // terminal). determineCols rejects it with error.InvalidWindowSize, which run() maps to
+    // exit 2 + a stderr message (no segfault). The explicit arm returns before the has_tty
+    // branch, so getSize is never called => safe to assert both. Boundary value 1 is accepted.
+    try std.testing.expectError(error.InvalidWindowSize, determineCols(0, false));
+    try std.testing.expectError(error.InvalidWindowSize, determineCols(0, true));
+    try std.testing.expectEqual(@as(u16, 1), try determineCols(1, false));
 }
 
 test "lineCount: counts input lines" {
