@@ -16,6 +16,10 @@ vendor/
 venv/
 .venv/
 
+# Python bytecode (the shell tests embed Python via pty; __pycache__ is generated)
+__pycache__/
+*.pyc
+
 # Environment files
 .env
 .env.*
@@ -32,6 +36,7 @@ Thumbs.db
 
 # Local agent runtime artifacts (subagent transcripts, session meta, progress)
 .pi-subagents/
+.pi/
 
 # Audit / scratch residue — never commit (see AGENTS.md). These are generated
 # by test/audit harnesses and must never enter history.

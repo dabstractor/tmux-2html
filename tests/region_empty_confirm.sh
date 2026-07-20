@@ -71,7 +71,7 @@ rm -f "$OUT" "$SIDECAR"            # start clean (SIDECAR may linger from envelo
 # Asserts the FIXED behavior: exit 1, NO output file. (Without the S2 fix this writes an
 # empty file and exits 0 — the bug; the python sys.exit(non-zero) below makes `|| fail` fire.)
 PATH="$SHIM:$PATH" python3 - "$PANE" "$OUT" "$BIN" <<'PYEOF' || fail "region empty-confirm pty drive"
-import os, pty, select, sys, time
+import os, pty, select, sys, time, signal
 pane, out, binary = sys.argv[1], sys.argv[2], sys.argv[3]
 pid, fd = pty.fork()
 if pid == 0:
@@ -79,28 +79,41 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    time.sleep(0.8)           # let the TUI paint
-    os.write(fd, b"v")        # begin a linewise selection on the (blank) cursor row
-    time.sleep(0.2)
-    os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
-    deadline = time.time() + 6
-    while time.time() < deadline:
-        r, _, _ = select.select([fd], [], [], 0.2)
-        if r:
+    # DRAIN while waiting (not bare sleep) so the pty output buffer never fills and
+    # deadlocks the TUI's paint writes — same fix as tests/envelope_smoke.sh's region
+    # drive (which hung CI runs for hours via this exact pattern). Draining keeps the
+    # buffer empty so the TUI completes each paint and reads our keystrokes.
+    def drain(secs):
+        end = time.time() + secs
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                continue
             try:
-                data = os.read(fd, 4096)
+                data = os.read(fd, 8192)
             except OSError:
                 break
             if not data:
                 break
-        else:
-            wpid, _ = os.waitpid(pid, os.WNOHANG)
-            if wpid != 0:
-                break
-    try:
-        _, status = os.waitpid(pid, 0)
-    except OSError:
-        status = 0
+    drain(0.8)                # let the TUI paint (buffer kept empty)
+    os.write(fd, b"v")        # begin a linewise selection on the (blank) cursor row
+    drain(0.2)
+    os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
+    # BOUNDED wait + SIGKILL: never hang the job (mirrors envelope_smoke.sh). Capture the
+    # exit status via WNOHANG so we can still assert the Issue-1 exit code below.
+    deadline = time.time() + 10
+    status = 0
+    exited = False
+    while time.time() < deadline:
+        drain(0.1)
+        wpid, st = os.waitpid(pid, os.WNOHANG)
+        if wpid != 0:
+            status, exited = st, True
+            break
+    if not exited:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        sys.exit("FAIL: empty-confirm timed out (region did not exit)")
     # os.waitstatus_to_exitcode (py3.9+) turns a raw wait status into the exit code the
     # shell would see (normal exit N -> N; signal S -> 128+S). We avoid the raw bit-shift
     # spelling here only because its two-greater-than token trips check-safety's R3 shim-

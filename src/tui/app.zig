@@ -87,14 +87,17 @@ pub var panic_in_progress = false;
 // (MIN/TIME changed to 1/0 for BLOCKING reads instead of palette's 0/5 timed OSC read).
 // ============================================================================
 
-/// PURE: produce a raw-mode termios from `original`. Clears ICANON/ECHO (lflag),
+/// PURE: produce a raw-mode termios from `original`. Clears ICANON/ECHO/ISIG (lflag),
 /// IXON/ICRNL/BRKINT (iflag), OPOST (oflag); sets CSIZE=.CS8 (cflag); sets cc[V.MIN]=1 /
 /// cc[V.TIME]=0 (BLOCKING byte-at-a-time reads). Leaves every other field EQUAL to `original`.
-/// No I/O — directly unit-tested.
+/// ISIG is cleared so Ctrl-c/Ctrl-z/Ctrl-\ arrive as readable bytes (input.zig classifies
+/// them) instead of kernel signals (SIGINT/SIGTSTP/SIGQUIT) — PRD §7.1 (always restore) /
+/// §7.5 (Ctrl-c ⇒ exit 1, not 130). No I/O — directly unit-tested.
 pub fn makeRaw(original: std.posix.termios) std.posix.termios {
     var raw = original;
     raw.lflag.ICANON = false; // no canonical (line) mode
     raw.lflag.ECHO = false; // no echo of keystrokes
+    raw.lflag.ISIG = false; // disable Ctrl-c/z/\ as signals → arrive as bytes input.zig handles (Issues 2 & 3, §7.5)
     raw.iflag.IXON = false; // disable Ctrl-S/Ctrl-Q flow control
     raw.iflag.ICRNL = false; // don't translate CR→NL
     raw.iflag.BRKINT = false; // no SIGINT on break
@@ -508,6 +511,7 @@ test "makeRaw: clears ICANON/ECHO/IXON/ICRNL/BRKINT/OPOST, sets CS8, MIN=1/TIME=
     var input: std.posix.termios = std.mem.zeroes(std.posix.termios);
     input.lflag.ICANON = true;
     input.lflag.ECHO = true;
+    input.lflag.ISIG = true;
     input.iflag.IXON = true;
     input.iflag.ICRNL = true;
     input.iflag.BRKINT = true;
@@ -521,6 +525,7 @@ test "makeRaw: clears ICANON/ECHO/IXON/ICRNL/BRKINT/OPOST, sets CS8, MIN=1/TIME=
     // cleared lflag / iflag / oflag flags
     try std.testing.expectEqual(false, raw.lflag.ICANON);
     try std.testing.expectEqual(false, raw.lflag.ECHO);
+    try std.testing.expectEqual(false, raw.lflag.ISIG);
     try std.testing.expectEqual(false, raw.iflag.IXON);
     try std.testing.expectEqual(false, raw.iflag.ICRNL);
     try std.testing.expectEqual(false, raw.iflag.BRKINT);
@@ -545,6 +550,7 @@ test "makeRaw: idempotent over an already-raw input (no flags to clear)" {
     const out = makeRaw(raw_input);
     try std.testing.expectEqual(false, out.lflag.ICANON);
     try std.testing.expectEqual(false, out.lflag.ECHO);
+    try std.testing.expectEqual(false, out.lflag.ISIG);
     try std.testing.expectEqual(@as(@TypeOf(out.cflag.CSIZE), .CS8), out.cflag.CSIZE);
     try std.testing.expectEqual(@as(u8, 1), out.cc[@intFromEnum(std.posix.V.MIN)]);
     try std.testing.expectEqual(@as(u8, 0), out.cc[@intFromEnum(std.posix.V.TIME)]);

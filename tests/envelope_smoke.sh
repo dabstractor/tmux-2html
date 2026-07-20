@@ -138,7 +138,7 @@ if [ "$have_py" -eq 0 ]; then
 else
     ROF=$W/region.html; rm -f "$ROF"
     PATH="$SHIM:$PATH" python3 - "$PANE" "$ROF" <<'PYEOF' || fail "region confirm pty drive"
-import os, pty, select, sys, time
+import os, pty, select, sys, time, signal
 pane, out = sys.argv[1], sys.argv[2]
 pid, fd = pty.fork()
 if pid == 0:
@@ -146,38 +146,48 @@ if pid == 0:
                ["tmux-2html", "region", "--target", pane, "--output", out],
                os.environ.copy())
 else:
-    time.sleep(0.8)           # let the TUI paint
-    # `v` (visual_toggle) RE-ANCHORS a linewise selection at the cursor but leaves it
-    # ZERO-extent (anchor == cursor); the user extends it by MOVING afterward
-    # (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig), so
-    # to get a non-empty selection: go to the top (gg), begin (v), then jump to the
-    # bottom (G) -> selects the whole pane, which contains the colored content. Without
-    # a post-`v` motion the selection body is empty and the Issue-1 guard rejects it.
-    os.write(fd, b"gg")       # go to top row
-    time.sleep(0.2)
-    os.write(fd, b"v")        # begin a linewise selection at the top (anchor)
-    time.sleep(0.2)
-    os.write(fd, b"G")        # extend to the bottom row (cursor) -> whole pane
-    time.sleep(0.2)
-    os.write(fd, b"\r")       # confirm (Enter -> regionHandle returns .confirm)
-    deadline = time.time() + 6
-    while time.time() < deadline:
-        r, _, _ = select.select([fd], [], [], 0.2)
-        if r:
+    # DRAIN while waiting — never bare time.sleep. region paints a full screen on every
+    # event; sleeping without reading lets the pty's ~64KB output buffer fill so the TUI
+    # BLOCKS on its paint write, never reads our keystrokes, confirm never fires, and a
+    # blocking os.waitpid then hangs the CI job for hours (the deadlock that hung runs
+    # 29755955109 / 29762462640 / 29764587186). Draining keeps the buffer empty so each
+    # paint completes and input is processed. (Local runs have a smaller/faster paint and
+    # never deadlocked — CI did.)
+    def drain(secs):
+        end = time.time() + secs
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if not r:
+                continue
             try:
-                data = os.read(fd, 4096)
+                data = os.read(fd, 8192)
             except OSError:
                 break
             if not data:
                 break
-        else:
-            wpid, _ = os.waitpid(pid, os.WNOHANG)
-            if wpid != 0:
-                break
-    try:
+    drain(0.8)                # let the TUI paint (buffer kept empty)
+    # `v` RE-ANCHORS a linewise selection but leaves it ZERO-extent; the user extends it
+    # by MOVING (src/tui/select.zig). region enters copy-mode AT THE BOTTOM (src/region.zig),
+    # so go to the top (gg), begin (v), jump to the bottom (G) -> whole-pane non-empty
+    # selection (contains the colored content). Without the post-`v` motion the Issue-1
+    # empty-selection guard rejects it.
+    for key in (b"gg", b"v", b"G", b"\r"):
+        os.write(fd, key)
+        drain(0.2)
+    # BOUNDED wait + SIGKILL: even if region never exits for any reason, FAIL in ~10s
+    # instead of hanging the job for 6h. Replaces the old blocking os.waitpid(pid, 0).
+    deadline = time.time() + 10
+    exited = False
+    while time.time() < deadline:
+        drain(0.1)
+        wpid, _ = os.waitpid(pid, os.WNOHANG)
+        if wpid != 0:
+            exited = True
+            break
+    if not exited:
+        os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-    except OSError:
-        pass
+        sys.exit("region: timed out (did not exit after gg/v/G/Enter)")
     if not os.path.exists(out):
         sys.exit("region: no output file written (confirm did not fire)")
 PYEOF
