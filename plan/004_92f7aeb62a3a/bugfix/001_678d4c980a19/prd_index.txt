@@ -1,0 +1,12 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: region confirm writes an empty-body HTML file (exit 0) for a blank-cell selection — violates PRD §13
+  h3.1 Issue 2: render --cols 0 and render --rows 0 segfault (core dump) — uncontrolled crash on accepted CLI input
+ h2.3 Minor Issues (Nice to Fix)
+  h3.2 Issue 3: Stale .last-output sidecar residue after a region confirm over blank cells (consequence of Issue 1)
+  h3.3 Issue 4: check-safety.sh emits WARNs for PATH-shim recipes inside plan/002_*/…/PRP.md
+ h2.4 Testing Summary
+---
+code:2 para:17 list:3
