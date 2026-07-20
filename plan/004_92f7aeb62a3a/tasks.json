@@ -4,14 +4,14 @@
       "type": "Phase",
       "id": "P1",
       "title": "Pane-anchored region overlay host",
-      "status": "Researching",
+      "status": "Ready",
       "description": "Land the code + test + docs to match the PRD change (commit 382d838) that switched the `region` TUI host from a forced-fullscreen `tmux display-popup` to a pane-anchored, borderless popup sized to exactly overlay the source pane. The PRD text is already committed; this phase makes the implementation, the binding test, and the documentation agree. Scope is ONE design decision: the `display-popup` flag set on the `C-o` region binding, the test helper that hardcodes that flag set, and the prose that describes it. No Zig code changes — the region subcommand sizes itself from the popup's own pty, which becomes 1:1 with the grid once the popup is pane-sized. See plan/004_92f7aeb62a3a/architecture/system_context.md for the verified current-vs-target state of every touched file.",
       "milestones": [
         {
           "type": "Milestone",
           "id": "P1.M1",
           "title": "Bind, test, and document the pane-anchored region popup",
-          "status": "Researching",
+          "status": "Ready",
           "description": "Replace the fullscreen `display-popup` flag set in the `C-o` region binding with the PRD §7.0/§9.3 pane-anchored borderless invocation; update the hardcoded sed prefix in the binding test so it keeps validating the region inner command; update the per-feature docs (CONFIGURATION.md) that describe the binding (Mode A, ride with the work); and sweep the changeset-level overview docs (README.md) as a final Mode B task. Verified against the live repo: tmux 3.6a is installed, `-B` is borderless (man page), the `P` position token parses without a flag error, and `popup_pane_left`/`popup_pane_bottom` formats exist. See plan/004_92f7aeb62a3a/architecture/external_tmux_popup.md.",
           "tasks": [
             {
@@ -49,14 +49,14 @@
               "type": "Task",
               "id": "P1.M1.T2",
               "title": "Sync changeset-level documentation",
-              "status": "Researching",
+              "status": "Ready",
               "description": "Final changeset-level (Mode B) documentation sweep. README.md has three region/runtime references that are overview-level (a feature bullet, the tmux version floor, and a section opener) and only make sense once the binding change (P1.M1.T1.S1) is in place. This task updates them to match the shipped pane-anchored overlay; it does not add new capability claims. Per system-prompt §5 Mode B this is a dedicated final task and its subtask declares a dependency on the implementing subtask so it runs last.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M1.T2.S1",
                   "title": "Update the three stale region/runtime references in README.md to the pane-anchored overlay",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M1.T1.S1"
