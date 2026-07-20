@@ -122,14 +122,14 @@
               "type": "Task",
               "id": "P1.M2.T2",
               "title": "Wire the .mouse arm into regionHandle + add RegionCtx.mouse_anchor",
-              "status": "Researching",
+              "status": "Ready",
               "description": "Connect the pure mouse logic to the live event loop: add a `mouse_anchor: ?view.Pos` field to RegionCtx and a `.mouse` arm to regionHandle (before the input.feed call, since feed returns null for mouse) that calls applyMouse + repaint. Update the stale doc-comment that called mouse a NO-OP follow-up.",
               "subtasks": [
                 {
                   "type": "Subtask",
                   "id": "P1.M2.T2.S1",
                   "title": "Add RegionCtx.mouse_anchor field + .mouse arm in regionHandle + doc-comment update",
-                  "status": "Researching",
+                  "status": "Ready",
                   "story_points": 1,
                   "dependencies": [
                     "P1.M2.T1.S1",
