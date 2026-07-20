@@ -18,7 +18,7 @@
               "type": "Task",
               "id": "P1.M1.T1",
               "title": "Fix region confirm empty-cell HTML output (Issue 1)",
-              "status": "Implementing",
+              "status": "Complete",
               "description": "The region TUI .confirm arm (src/region.zig:438-506) guards only on !ctx.sel.active() ('was a selection begun?'), not on whether the selection renders non-blank content. An active selection over blank cells passes the guard, is rendered into a full HTML document via renderSelectionHtml, written to disk, sidecar'd, and exits 0. The sibling render --selection path already has the correct check (selectionBodyEmpty at render.zig:609), but that helper is module-private. Fix: make the helper pub, add the check in region.zig before writeHtmlAtomic/writeLastOutput, and add an integration test.",
               "subtasks": [
                 {
@@ -58,7 +58,7 @@
                   "type": "Subtask",
                   "id": "P1.M1.T1.S3",
                   "title": "Add region integration test for blank-cell confirm (pty-driven)",
-                  "status": "Implementing",
+                  "status": "Complete",
                   "story_points": 2,
                   "dependencies": [
                     "P1.M1.T1.S2"
