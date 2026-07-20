@@ -1,0 +1,11 @@
+h1.0 Bug Fix Requirements
+ h2.0 Overview
+ h2.1 Critical Issues (Must Fix)
+ h2.2 Major Issues (Should Fix)
+  h3.0 Issue 1: Mouse support (PRD §7.6) is completely non-functional — click/drag/wheel are all silently ignored
+  h3.1 Issue 2: Ctrl-z (SIGTSTP) freezes the region popup with no in-TUI recovery and the terminal left unrestored
+ h2.3 Minor Issues (Nice to Fix)
+  h3.2 Issue 3: Ctrl-c exits 130, not PRD §7.5's "exit 1" (same root cause as Issue 2)
+ h2.4 Testing Summary
+---
+code:2 para:17 list:4
