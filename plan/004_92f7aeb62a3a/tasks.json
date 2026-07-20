@@ -1,0 +1,81 @@
+{
+  "backlog": [
+    {
+      "type": "Phase",
+      "id": "P1",
+      "title": "Pane-anchored region overlay host",
+      "status": "Ready",
+      "description": "Land the code + test + docs to match the PRD change (commit 382d838) that switched the `region` TUI host from a forced-fullscreen `tmux display-popup` to a pane-anchored, borderless popup sized to exactly overlay the source pane. The PRD text is already committed; this phase makes the implementation, the binding test, and the documentation agree. Scope is ONE design decision: the `display-popup` flag set on the `C-o` region binding, the test helper that hardcodes that flag set, and the prose that describes it. No Zig code changes — the region subcommand sizes itself from the popup's own pty, which becomes 1:1 with the grid once the popup is pane-sized. See plan/004_92f7aeb62a3a/architecture/system_context.md for the verified current-vs-target state of every touched file.",
+      "milestones": [
+        {
+          "type": "Milestone",
+          "id": "P1.M1",
+          "title": "Bind, test, and document the pane-anchored region popup",
+          "status": "Planned",
+          "description": "Replace the fullscreen `display-popup` flag set in the `C-o` region binding with the PRD §7.0/§9.3 pane-anchored borderless invocation; update the hardcoded sed prefix in the binding test so it keeps validating the region inner command; update the per-feature docs (CONFIGURATION.md) that describe the binding (Mode A, ride with the work); and sweep the changeset-level overview docs (README.md) as a final Mode B task. Verified against the live repo: tmux 3.6a is installed, `-B` is borderless (man page), the `P` position token parses without a flag error, and `popup_pane_left`/`popup_pane_bottom` formats exist. See plan/004_92f7aeb62a3a/architecture/external_tmux_popup.md.",
+          "tasks": [
+            {
+              "type": "Task",
+              "id": "P1.M1.T1",
+              "title": "Region binding uses the pane-anchored popup (impl + test + Mode A docs)",
+              "status": "Planned",
+              "description": "One coherent change spanning three files, all driven by the single decision to size/anchor the region popup to the source pane. The `display-popup` flag set in the `C-o` binding changes from `-E -w 100% -h 100%` to `-B -E -w '#{pane_width}' -h '#{pane_height}' -x P -y P -t '#{pane_id}'`. Per system-prompt §3 (implicit TDD) the binding test update rides in THIS subtask — the test's sed extraction hardcodes the old prefix and would otherwise go red the moment the binding changes, so they must move as one unit. Per §5 Mode A, the two CONFIGURATION.md lines that describe the binding ride here too — they are per-feature docs directly touched by this change, NOT a separate docs task. The three-layer quoting (tmux formats in single quotes; $TMUX_2HTML_BIN/$title_arg/$lang_arg expanded now; escaped \\\"/\\$ deferred to fire time) and the `.last-output` sidecar wrapper are preserved verbatim around the new flags.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T1.S1",
+                  "title": "Swap the region binding to the pane-anchored popup; fix its test; update the two CONFIGURATION.md region-overlay lines",
+                  "status": "Planned",
+                  "story_points": 2,
+                  "dependencies": [],
+                  "prd_selectors": [
+                    "h2.0",
+                    "h3.0",
+                    "h3.1",
+                    "h2.2",
+                    "h3.5",
+                    "h3.8",
+                    "h2.9",
+                    "h3.16",
+                    "h3.18",
+                    "h2.12",
+                    "h2.15"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Read plan/004_92f7aeb62a3a/architecture/system_context.md FIRST — it contains the exact current line in tmux-2html.tmux, the exact target replacement line, the three-layer quoting GOTCHA, the robust sed fix, and the two CONFIGURATION.md strings to change. Also read plan/004_92f7aeb62a3a/architecture/external_tmux_popup.md for the tmux 3.3 flag facts (`-B`=borderless [HIGH confidence]; `P`=pane-anchored position token [MED-HIGH]; `-x P`=pane left column, `-y P`=pane bottom edge so with `-h pane_height` the popup top row = pane top row [MED]; `-B` makes the inner pty the full `-w`x`-h` footprint vs bordered losing 1 cell/side [HIGH]). These are corroborated locally: tmux 3.6a is installed, `man tmux` confirms `-B does not surround the popup by a border`, and an isolated-server parse check of `display-popup -B -E -w '#{pane_width}' -h '#{pane_height}' -x P -y P -t <pane> 'true'` produced only 'no current client' (headless) with NO usage/flag error.\n2. INPUT: The current `C-o` region binding block in `tmux-2html.tmux` (the 'C-o region binding — P2.M2.T2.S2' section; the single `tmux bind-key ... run-shell \"...\"` line plus the multi-line `# PRD §9.3 + §7.5: ... opens a full-screen tmux display-popup ...` comment block above it). The current c.3 REGION sed line in `tests/plugin_options.sh`: `rinner=$(printf '%s' \"$rline\" | sed 's/.*display-popup -E -w 100% -h 100% \"//; s/\"; if.*//')`. The two CONFIGURATION.md strings: the `@tmux-2html-region-key` option-table row ('open the full-screen region overlay (TUI)') and the '## The region overlay' section opener ('a full-screen `tmux display-popup` running `tmux-2html region`').\n3. LOGIC: (a) In `tmux-2html.tmux`, replace ONLY the `display-popup -E -w 100% -h 100%` token within the C-o binding with `display-popup -B -E -w '#{pane_width}' -h '#{pane_height}' -x P -y P -t '#{pane_id}'`. PRESERVE everything else verbatim: the `last=\"$TMUX_2HTML_BIN/.last-output\"; rm -f \"\\$last\"; ...` wrapper, the escaped-double-quote wrapping of the inner popup command (`\\\"$TMUX_2HTML_BIN/tmux-2html region $title_arg $lang_arg --target '#{pane_id}'\\\"`), and the `if [ -f \"\\$last\" ]; then out=\\$(cat \"\\$last\"); tmux display-message \"tmux-2html: wrote \\$out\"; fi` tail. CRITICAL QUOTING: `#{pane_width}`, `#{pane_height}`, and BOTH `#{pane_id}` occurrences (the new `-t` one and the existing `--target` one) are tmux formats that run-shell expands at FIRE time, so they MUST be in SINGLE QUOTES inside the inner command — exactly as `#{pane_id}` already is today — never expanded now. `$TMUX_2HTML_BIN`, `$title_arg`, `$lang_arg` stay expanded-now. `-x P`/`-y P` are literal tokens (no `$`/`{}`) and need no quoting. (b) Rewrite the comment block above the binding so it NO LONGER says 'full-screen' — describe the pane-anchored, borderless host (sized to `#{pane_width}`x`#{pane_height}`, anchored over the pane top-left via `-x P -y P`, borderless `-B` so the inner pty is the full footprint) and cite §7.0. (c) In `tests/plugin_options.sh`, replace the hardcoded c.3 sed prefix with a robust form that strips up to the first `display-popup ` and the first `\"` regardless of flags, e.g. `rinner=$(printf '%s' \"$rline\" | sed 's/.*display-popup [^\"]*\"//; s/\"; if.*//')` — this matches BOTH old and new prefixes and leaves the inner `tmux-2html region ... --target '#{pane_id}'` string for `/bin/sh -n`. The assertion intent (the apostrophe-escaped region inner command parses cleanly) is unchanged. (d) In `docs/CONFIGURATION.md`, rewrite the `@tmux-2html-region-key` option-table row and the '## The region overlay' opener to describe the pane-anchored overlay instead of 'full-screen' (cite §7.0); keep the rest of that section unchanged.\n4. OUTPUT: An updated `tmux-2html.tmux` whose C-o binding launches a pane-anchored borderless popup; an updated `tests/plugin_options.sh` whose c.3 block still extracts + `/bin/sh -n`-validates the region inner command; an updated `docs/CONFIGURATION.md` with no stale 'full-screen' region references. No other files change. src/region.zig, src/capture.zig, src/tui/*, and the palette auto-sync popup (a different, 50% popup) are UNTOUCHED.\n5. MOCKING: No external services. The binding test uses the existing mock `tmux()` shell-function harness (a mktemp dir + a fake `tmux-2html` binary); it shells to NO real tmux server (PRD §0/§0.1). Verification commands: `sh -n tmux-2html.tmux`, `sh -n tests/plugin_options.sh`, `bash tests/plugin_options.sh` (expect PASS), `scripts/check-safety.sh`, `scripts/preflight.sh`. Do NOT run any `tmux kill-server`/`killall tmux`/`pkill tmux` (PRD §0). A visual popup check is OPTIONAL and only against an isolated named socket, never the user's server.\n6. DOCS: [Mode A] This subtask updates the two docs/CONFIGURATION.md region-overlay references directly touched by the binding change (the option-table row + the section opener). This rides WITH the work per system-prompt §5 Mode A; do NOT create a separate per-feature docs subtask. The cross-cutting README.md sweep is a SEPARATE downstream Mode B task (P1.M1.T2.S1)."
+                }
+              ]
+            },
+            {
+              "type": "Task",
+              "id": "P1.M1.T2",
+              "title": "Sync changeset-level documentation",
+              "status": "Planned",
+              "description": "Final changeset-level (Mode B) documentation sweep. README.md has three region/runtime references that are overview-level (a feature bullet, the tmux version floor, and a section opener) and only make sense once the binding change (P1.M1.T1.S1) is in place. This task updates them to match the shipped pane-anchored overlay; it does not add new capability claims. Per system-prompt §5 Mode B this is a dedicated final task and its subtask declares a dependency on the implementing subtask so it runs last.",
+              "subtasks": [
+                {
+                  "type": "Subtask",
+                  "id": "P1.M1.T2.S1",
+                  "title": "Update the three stale region/runtime references in README.md to the pane-anchored overlay",
+                  "status": "Planned",
+                  "story_points": 1,
+                  "dependencies": [
+                    "P1.M1.T1.S1"
+                  ],
+                  "prd_selectors": [
+                    "h3.1",
+                    "h2.2",
+                    "h3.8",
+                    "h2.9",
+                    "h3.18",
+                    "h2.12"
+                  ],
+                  "context_scope": "CONTRACT DEFINITION:\n1. RESEARCH NOTE: Read plan/004_92f7aeb62a3a/architecture/system_context.md §2.4 for the exact three README.md references to change, and external_tmux_popup.md claim #5 for why the version floor is 3.3 (the region overlay uses `-B` borderless + pane-anchored `-x`/`-y` position tokens, both tmux 3.3; `display-popup` itself is 3.2 but `-B` alone forces 3.3). The binding change this sweep reflects is implemented in P1.M1.T1.S1 (dependency) — this task runs AFTER it so the overview matches the shipped binding.\n2. INPUT: The three current README.md strings (verify against the live file, line numbers are approximate): (1) Capture modes -> Region bullet: 'Opens a copy-mode-style full-screen overlay over the scrollback and lets you select a line range or a block to render.' (2) Requirements section: '**tmux >= 3.2.** The region overlay and the one-time palette sync use `display-popup`, which tmux 3.2 introduced.' (3) '## The region overlay' opener: 'Press `prefix C-o` to open a full-screen, copy-mode-style overlay over the pane scrollback.'\n3. LOGIC: (1) Region bullet -> replace 'full-screen overlay' with a pane-anchored overlay sized to the current pane (the user controls the rendered width by sizing the pane first). (2) Requirements -> bump '**tmux >= 3.2**' to '**tmux >= 3.3**' and update the rationale: the REGION overlay uses `-B` borderless + pane-anchored `-x`/`-y` position tokens (PRD §7.0/§12), which require tmux 3.3. Keep the nuance that the one-time palette auto-sync popup only needs `display-popup` (3.2), but bind the version FLOOR to the region overlay's flags. (3) Section opener -> replace 'a full-screen, copy-mode-style overlay' with 'a pane-anchored, copy-mode-style overlay' sized to the pane. Do NOT add new capability claims; this is a wording + version-bump fix only. After editing, grep README.md for 'full-screen' / 'full screen' / '3.2' to confirm no other region/runtime wording is stale.\n4. OUTPUT: A README.md whose region feature bullet, Requirements tmux version floor (3.3), and region-overlay section opener all describe the pane-anchored overlay and are consistent with the shipped binding. No other files change.\n5. MOCKING: None. Verification: re-read README.md region/Requirements sections; optionally `grep -n -iE 'full-screen|full screen|tmux >= 3\\.' README.md` returns only the intended updated mentions. No tmux server is involved (PRD §0/§0.1 trivially satisfied).\n6. DOCS: [Mode B] This IS the changeset-level documentation task (system-prompt §5 Mode B). It sweeps README.md (overview/feature blurb + version requirement) to match the whole pane-anchored-overlay changeset; it depends on P1.M1.T1.S1 and runs last. The per-feature docs/CONFIGURATION.md updates were already handled inline in P1.M1.T1.S1 (Mode A)."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
