@@ -758,6 +758,10 @@ pub fn run(alloc: std.mem.Allocator, opts: cli.RenderOpts) !u8 {
         return 2; // size error
     };
     const rows = opts.rows orelse lineCount(ansi); // default = input line count
+    if (rows < 1) { // explicit --rows 0 -> exit 2 (Issue 2 segfault guard); lineCount floors at >= 1
+        reportSizeError(error.InvalidWindowSize);
+        return 2; // size error
+    }
     const size = Size{ .cols = cols, .rows = rows };
 
     const stderr = std.fs.File.stderr();
