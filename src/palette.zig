@@ -24,12 +24,13 @@ pub const Colors = struct {
 };
 
 /// Last-resort defaults (PRD §6 precedence "default"): the Ghostty bundled 256-color
-/// palette, foreground = palette[7], background = the fixed tmux-2html dark bg.
+/// palette, foreground = palette[7], background = the fixed tmux-2html dark bg (lightened
+/// a few notches from the original 41,44,51 so the dark theme's page surface isn't so heavy).
 pub fn defaultColors() Colors {
     return .{
         .palette = ghostty_vt.color.default,
         .foreground = ghostty_vt.color.default[7],
-        .background = .{ .r = 41, .g = 44, .b = 51 },
+        .background = .{ .r = 64, .g = 68, .b = 76 },
         .palette_received_count = 256,
     };
 }
@@ -164,8 +165,8 @@ test "defaultColors: bundled palette, fixed fg/bg, full count" {
     try std.testing.expectEqual(ghostty_vt.color.default, c.palette);
     // foreground = palette[7].
     try std.testing.expectEqual(ghostty_vt.color.default[7], c.foreground.?);
-    // background = fixed 41,44,51.
-    try std.testing.expectEqual(color.RGB{ .r = 41, .g = 44, .b = 51 }, c.background.?);
+    // background = fixed 64,68,76 (lightened dark theme surface).
+    try std.testing.expectEqual(color.RGB{ .r = 64, .g = 68, .b = 76 }, c.background.?);
 }
 
 test "applyOscCommand: OSC 4 palette set (rgb:cc/00/00 -> idx 0 red)" {
